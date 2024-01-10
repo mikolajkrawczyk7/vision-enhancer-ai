@@ -1,5 +1,8 @@
 // rife implemented with ncnn library
 
+#include <iostream>
+#include <chrono>
+
 #include <stdio.h>
 #include <algorithm>
 #include <queue>
@@ -243,6 +246,8 @@ public:
     ncnn::Mat in0image;
     ncnn::Mat in1image;
     ncnn::Mat outimage;
+
+    int duration;
 };
 
 class TaskQueue
@@ -357,7 +362,12 @@ void* proc(void* args)
         if (v.id == -233)
             break;
 
+        auto start = std::chrono::high_resolution_clock::now();
         rife->process(v.in0image, v.in1image, v.timestep, v.outimage);
+        auto stop = std::chrono::high_resolution_clock::now();
+
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+        v.duration = duration.count();
 
         tosave.put(v);
     }
@@ -421,13 +431,13 @@ void* save(void* args)
 
         if (ret == 0)
         {
-            if (verbose)
+            if (verbose && v.duration > 0)
             {
-#if _WIN32
-                fwprintf(stderr, L"%ls %ls %f -> %ls done\n", v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
-#else
-                fprintf(stderr, "%s %s %f -> %s done\n", v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
-#endif
+// #if _WIN32
+                // fwprintf(stderr, L"%ls %ls %f -> %ls done\n", v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
+// #else
+                fprintf(stderr, "[%i ms] %s %s %f -> %s done\n", v.duration, v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
+// #endif
             }
         }
     }
