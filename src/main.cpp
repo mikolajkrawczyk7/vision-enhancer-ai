@@ -2,6 +2,23 @@
 
 #include <iostream>
 #include <chrono>
+#include <iomanip>
+#include <filesystem>
+
+namespace fs = std::filesystem;
+
+int get_file_count(const std::string& path)
+{
+    int count = 0;
+    for (const auto& entry : fs::directory_iterator(path))
+    {
+        if (fs::is_regular_file(entry))
+        {
+            count++;
+        }
+    }
+    return count;
+}
 
 #include <stdio.h>
 #include <algorithm>
@@ -296,6 +313,14 @@ private:
     std::queue<Task> tasks;
 };
 
+path_t get_frame_path(path_t source_dir, path_t prefix, int number)
+{
+    std::ostringstream oss;
+    oss << prefix << std::setw(8) << std::setfill('0') << number << ".png";
+    path_t path = source_dir + PATHSTR('/') + oss.str();
+    return path;
+}
+
 TaskQueue toproc;
 TaskQueue tosave;
 
@@ -309,34 +334,63 @@ public:
     std::vector<path_t> input1_files;
     std::vector<path_t> output_files;
     std::vector<float> timesteps;
+
+    path_t input_dir;
+    path_t output_dir;
+
+    int frame_count;
 };
 
 void* load(void* args)
 {
     const LoadThreadParams* ltp = (const LoadThreadParams*)args;
-    const int count = ltp->output_files.size();
+    // const int count = ltp->output_files.size();
+    const int count = ltp->frame_count - 1;
+    const path_t input_dir = ltp->input_dir;
+    const path_t output_dir = ltp->output_dir;
 
     #pragma omp parallel for schedule(static,1) num_threads(ltp->jobs_load)
     for (int i=0; i<count; i++)
     {
-        const path_t& image0path = ltp->input0_files[i];
-        const path_t& image1path = ltp->input1_files[i];
-
         Task v;
         v.id = i;
-        v.in0path = image0path;
-        v.in1path = image1path;
-        v.outpath = ltp->output_files[i];
-        v.timestep = ltp->timesteps[i];
+        v.in0path = get_frame_path(input_dir, "frame_", i + 1);
+        v.in1path = get_frame_path(input_dir, "frame_", i + 2);
+        v.outpath = get_frame_path(input_dir, "frame_", i * 2 + 2);
+        v.timestep = 0.5;
 
-        int ret0 = decode_image(image0path, v.in0image, &v.webp0);
-        int ret1 = decode_image(image1path, v.in1image, &v.webp1);
+        int ret0 = decode_image(
+            // get_frame_path(input_dir, "frame_", i + 1),
+            v.in0path, v.in0image, &v.webp0);
+
+        int ret1 = decode_image(
+            // get_frame_path(input_dir, "frame_", i + 2),
+            v.in1path, v.in1image, &v.webp1);
 
         if (ret0 != 0 || ret1 != 1)
         {
             v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
             toproc.put(v);
         }
+
+        // const path_t& image0path = ltp->input0_files[i];
+        // const path_t& image1path = ltp->input1_files[i];
+
+        // Task v;
+        // v.id = i;
+        // v.in0path = image0path;
+        // v.in1path = image1path;
+        // v.outpath = ltp->output_files[i];
+        // v.timestep = ltp->timesteps[i];
+
+        // int ret0 = decode_image(image0path, v.in0image, &v.webp0);
+        // int ret1 = decode_image(image1path, v.in1image, &v.webp1);
+
+        // if (ret0 != 0 || ret1 != 1)
+        // {
+        //     v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
+        //     toproc.put(v);
+        // }
     }
 
     return 0;
@@ -379,12 +433,16 @@ class SaveThreadParams
 {
 public:
     int verbose;
+    path_t input_dir;
+    path_t output_dir;
 };
 
 void* save(void* args)
 {
     const SaveThreadParams* stp = (const SaveThreadParams*)args;
     const int verbose = stp->verbose;
+    const path_t input_dir = stp->input_dir;
+    const path_t output_dir = stp->output_dir;
 
     for (;;)
     {
@@ -395,8 +453,20 @@ void* save(void* args)
         if (v.id == -233)
             break;
 
-        int ret = encode_image(v.outpath, v.outimage);
+        int ret = encode_image(
+            // get_frame_path(output_dir, "", v.id * 2 + 2),
+            v.outpath, v.outimage);
 
+        if (v.id == 0)
+        {
+            int ret0 = encode_image(
+                get_frame_path(output_dir, "", v.id * 2 + 1),
+                v.in0image);
+        }
+        int ret1 = encode_image(
+            get_frame_path(output_dir, "", v.id * 2 + 3),
+            v.in1image);
+        
         // free input pixel data
         {
             unsigned char* pixeldata = (unsigned char*)v.in0image.data;
@@ -698,82 +768,83 @@ int main(int argc, char** argv)
         return -1;
     }
 
+    int frame_count = get_file_count(inputpath);
     // collect input and output filepath
-    std::vector<path_t> input0_files;
-    std::vector<path_t> input1_files;
-    std::vector<path_t> output_files;
-    std::vector<float> timesteps;
-    {
-        if (!inputpath.empty() && path_is_directory(inputpath) && path_is_directory(outputpath))
-        {
-            std::vector<path_t> filenames;
-            int lr = list_directory(inputpath, filenames);
-            if (lr != 0)
-                return -1;
-
-            const int count = filenames.size();
-            if (numframe == 0)
-                numframe = count * 2;
-
-            input0_files.resize(numframe);
-            input1_files.resize(numframe);
-            output_files.resize(numframe);
-            timesteps.resize(numframe);
-
-            double scale = (double)count / numframe;
-            for (int i=0; i<numframe; i++)
-            {
-                // TODO provide option to control timestep interpolate method
-//                 float fx = (float)((i + 0.5) * scale - 0.5);
-                float fx = i * scale;
-                int sx = static_cast<int>(floor(fx));
-                fx -= sx;
-
-                if (sx < 0)
-                {
-                    sx = 0;
-                    fx = 0.f;
-                }
-                if (sx >= count - 1)
-                {
-                    sx = count - 2;
-                    fx = 1.f;
-                }
-
-//                 fprintf(stderr, "%d %f %d\n", i, fx, sx);
-
-                path_t filename0 = filenames[sx];
-                path_t filename1 = filenames[sx + 1];
-
-#if _WIN32
-                wchar_t tmp[256];
-                swprintf(tmp, pattern.c_str(), i+1);
-#else
-                char tmp[256];
-                sprintf(tmp, pattern.c_str(), i+1); // ffmpeg start from 1
-#endif
-                path_t output_filename = path_t(tmp) + PATHSTR('.') + format;
-
-                input0_files[i] = inputpath + PATHSTR('/') + filename0;
-                input1_files[i] = inputpath + PATHSTR('/') + filename1;
-                output_files[i] = outputpath + PATHSTR('/') + output_filename;
-                timesteps[i] = fx;
-            }
-        }
-        else if (inputpath.empty() && !path_is_directory(input0path) && !path_is_directory(input1path) && !path_is_directory(outputpath))
-        {
-            input0_files.push_back(input0path);
-            input1_files.push_back(input1path);
-            output_files.push_back(outputpath);
-            timesteps.push_back(timestep);
-        }
-        else
-        {
-            fprintf(stderr, "input0path, input1path and outputpath must be file at the same time\n");
-            fprintf(stderr, "inputpath and outputpath must be directory at the same time\n");
-            return -1;
-        }
-    }
+    // std::vector<path_t> input0_files;
+    // std::vector<path_t> input1_files;
+    // std::vector<path_t> output_files;
+    // std::vector<float> timesteps;
+    // {
+        // if (!inputpath.empty() && path_is_directory(inputpath) && path_is_directory(outputpath))
+        // {
+            // std::vector<path_t> filenames;
+            // int lr = list_directory(inputpath, filenames);
+            // if (lr != 0)
+                // return -1;
+// 
+            // const int count = filenames.size();
+            // if (numframe == 0)
+                // numframe = count * 2;
+// 
+            // input0_files.resize(numframe);
+            // input1_files.resize(numframe);
+            // output_files.resize(numframe);
+            // timesteps.resize(numframe);
+// 
+            // double scale = (double)count / numframe;
+            // for (int i=0; i<numframe; i++)
+            // {
+                // // TODO provide option to control timestep interpolate method
+// //                 float fx = (float)((i + 0.5) * scale - 0.5);
+                // float fx = i * scale;
+                // int sx = static_cast<int>(floor(fx));
+                // fx -= sx;
+// 
+                // if (sx < 0)
+                // {
+                    // sx = 0;
+                    // fx = 0.f;
+                // }
+                // if (sx >= count - 1)
+                // {
+                    // sx = count - 2;
+                    // fx = 1.f;
+                // }
+// 
+// //                 fprintf(stderr, "%d %f %d\n", i, fx, sx);
+// 
+                // path_t filename0 = filenames[sx];
+                // path_t filename1 = filenames[sx + 1];
+// 
+// #if _WIN32
+                // wchar_t tmp[256];
+                // swprintf(tmp, pattern.c_str(), i+1);
+// #else
+                // char tmp[256];
+                // sprintf(tmp, pattern.c_str(), i+1); // ffmpeg start from 1
+// #endif
+                // path_t output_filename = path_t(tmp) + PATHSTR('.') + format;
+// 
+                // input0_files[i] = inputpath + PATHSTR('/') + filename0;
+                // input1_files[i] = inputpath + PATHSTR('/') + filename1;
+                // output_files[i] = outputpath + PATHSTR('/') + output_filename;
+                // timesteps[i] = fx;
+            // }
+        // }
+        // else if (inputpath.empty() && !path_is_directory(input0path) && !path_is_directory(input1path) && !path_is_directory(outputpath))
+        // {
+            // input0_files.push_back(input0path);
+            // input1_files.push_back(input1path);
+            // output_files.push_back(outputpath);
+            // timesteps.push_back(timestep);
+        // }
+        // else
+        // {
+            // fprintf(stderr, "input0path, input1path and outputpath must be file at the same time\n");
+            // fprintf(stderr, "inputpath and outputpath must be directory at the same time\n");
+            // return -1;
+        // }
+    // }
 
     path_t modeldir = sanitize_dirpath(model);
 
@@ -842,10 +913,13 @@ int main(int argc, char** argv)
             // load image
             LoadThreadParams ltp;
             ltp.jobs_load = jobs_load;
-            ltp.input0_files = input0_files;
-            ltp.input1_files = input1_files;
-            ltp.output_files = output_files;
-            ltp.timesteps = timesteps;
+            // ltp.input0_files = input0_files;
+            // ltp.input1_files = input1_files;
+            // ltp.output_files = output_files;
+            // ltp.timesteps = timesteps;
+            ltp.input_dir = inputpath;
+            ltp.output_dir = outputpath;
+            ltp.frame_count = frame_count;
 
             ncnn::Thread load_thread(load, (void*)&ltp);
 
@@ -878,6 +952,8 @@ int main(int argc, char** argv)
             // save image
             SaveThreadParams stp;
             stp.verbose = verbose;
+            stp.input_dir = inputpath;
+            stp.output_dir = outputpath;
 
             std::vector<ncnn::Thread*> save_threads(jobs_save);
             for (int i=0; i<jobs_save; i++)
