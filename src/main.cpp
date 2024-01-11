@@ -349,48 +349,70 @@ void* load(void* args)
     const path_t input_dir = ltp->input_dir;
     const path_t output_dir = ltp->output_dir;
 
-    #pragma omp parallel for schedule(static,1) num_threads(ltp->jobs_load)
-    for (int i=0; i<count; i++)
+    // const path_t& image0path = ltp->input0_files[0];
+    // const path_t& image1path = ltp->input1_files[0];
+    // const path_t& outputpath = ltp->output_files[0];
+
+    if (ltp->output_files.size() > 0)
     {
         Task v;
-        v.id = i;
-        v.in0path = get_frame_path(input_dir, "frame_", i + 1);
-        v.in1path = get_frame_path(input_dir, "frame_", i + 2);
-        v.outpath = get_frame_path(input_dir, "frame_", i * 2 + 2);
+        v.id = -1;
+        v.in0path = ltp->input0_files[0];
+        v.in1path = ltp->input1_files[0];
+        v.outpath = ltp->output_files[0];
         v.timestep = 0.5;
 
-        int ret0 = decode_image(
-            // get_frame_path(input_dir, "frame_", i + 1),
-            v.in0path, v.in0image, &v.webp0);
+        int ret0 = decode_image(v.in0path, v.in0image, &v.webp0);
+        int ret1 = decode_image(v.in1path, v.in1image, &v.webp1);
 
-        int ret1 = decode_image(
-            // get_frame_path(input_dir, "frame_", i + 2),
-            v.in1path, v.in1image, &v.webp1);
-
-        if (ret0 != 0 || ret1 != 1)
+        v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
+        toproc.put(v);
+    }
+    else
+    {
+        #pragma omp parallel for schedule(static,1) num_threads(ltp->jobs_load)
+        for (int i=0; i<count; i++)
         {
-            v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
-            toproc.put(v);
+            Task v;
+            v.id = i;
+            v.in0path = get_frame_path(input_dir, "frame_", i + 1);
+            v.in1path = get_frame_path(input_dir, "frame_", i + 2);
+            v.outpath = get_frame_path(input_dir, "frame_", i * 2 + 2);
+            v.timestep = 0.5;
+
+            int ret0 = decode_image(
+                // get_frame_path(input_dir, "frame_", i + 1),
+                v.in0path, v.in0image, &v.webp0);
+
+            int ret1 = decode_image(
+                // get_frame_path(input_dir, "frame_", i + 2),
+                v.in1path, v.in1image, &v.webp1);
+
+            if (ret0 != 0 || ret1 != 1)
+            {
+                v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
+                toproc.put(v);
+            }
+
+            // const path_t& image0path = ltp->input0_files[i];
+            // const path_t& image1path = ltp->input1_files[i];
+
+            // Task v;
+            // v.id = i;
+            // v.in0path = image0path;
+            // v.in1path = image1path;
+            // v.outpath = ltp->output_files[i];
+            // v.timestep = ltp->timesteps[i];
+
+            // int ret0 = decode_image(image0path, v.in0image, &v.webp0);
+            // int ret1 = decode_image(image1path, v.in1image, &v.webp1);
+
+            // if (ret0 != 0 || ret1 != 1)
+            // {
+            //     v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
+            //     toproc.put(v);
+            // }
         }
-
-        // const path_t& image0path = ltp->input0_files[i];
-        // const path_t& image1path = ltp->input1_files[i];
-
-        // Task v;
-        // v.id = i;
-        // v.in0path = image0path;
-        // v.in1path = image1path;
-        // v.outpath = ltp->output_files[i];
-        // v.timestep = ltp->timesteps[i];
-
-        // int ret0 = decode_image(image0path, v.in0image, &v.webp0);
-        // int ret1 = decode_image(image1path, v.in1image, &v.webp1);
-
-        // if (ret0 != 0 || ret1 != 1)
-        // {
-        //     v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
-        //     toproc.put(v);
-        // }
     }
 
     return 0;
@@ -457,15 +479,18 @@ void* save(void* args)
             // get_frame_path(output_dir, "", v.id * 2 + 2),
             v.outpath, v.outimage);
 
-        if (v.id == 0)
+        if (v.id != -1)
         {
-            int ret0 = encode_image(
-                get_frame_path(output_dir, "", v.id * 2 + 1),
-                v.in0image);
+            if (v.id == 0)
+            {
+                int ret0 = encode_image(
+                    get_frame_path(output_dir, "", v.id * 2 + 1),
+                    v.in0image);
+            }
+            int ret1 = encode_image(
+                get_frame_path(output_dir, "", v.id * 2 + 3),
+                v.in1image);
         }
-        int ret1 = encode_image(
-            get_frame_path(output_dir, "", v.id * 2 + 3),
-            v.in1image);
         
         // free input pixel data
         {
@@ -768,7 +793,34 @@ int main(int argc, char** argv)
         return -1;
     }
 
-    int frame_count = get_file_count(inputpath);
+    int frame_count = 0;
+
+    // collect input and output filepath
+    std::vector<path_t> input0_files;
+    std::vector<path_t> input1_files;
+    std::vector<path_t> output_files;
+    std::vector<float> timesteps;
+    {
+        if (!inputpath.empty() && path_is_directory(inputpath) && path_is_directory(outputpath))
+        {
+            frame_count = get_file_count(inputpath);
+        }
+        else if (inputpath.empty() && !path_is_directory(input0path) && !path_is_directory(input1path) && !path_is_directory(outputpath))
+        {
+            input0_files.push_back(input0path);
+            input1_files.push_back(input1path);
+            output_files.push_back(outputpath);
+            timesteps.push_back(timestep);
+        }
+        else
+        {
+            fprintf(stderr, "input0path, input1path and outputpath must be file at the same time\n");
+            fprintf(stderr, "inputpath and outputpath must be directory at the same time\n");
+            return -1;
+        }
+    }
+    // int frame_count = get_file_count(inputpath);
+
     // collect input and output filepath
     // std::vector<path_t> input0_files;
     // std::vector<path_t> input1_files;
@@ -913,10 +965,10 @@ int main(int argc, char** argv)
             // load image
             LoadThreadParams ltp;
             ltp.jobs_load = jobs_load;
-            // ltp.input0_files = input0_files;
-            // ltp.input1_files = input1_files;
-            // ltp.output_files = output_files;
-            // ltp.timesteps = timesteps;
+            ltp.input0_files = input0_files;
+            ltp.input1_files = input1_files;
+            ltp.output_files = output_files;
+            ltp.timesteps = timesteps;
             ltp.input_dir = inputpath;
             ltp.output_dir = outputpath;
             ltp.frame_count = frame_count;
