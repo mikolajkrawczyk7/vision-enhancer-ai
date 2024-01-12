@@ -116,6 +116,7 @@ static std::vector<int> parse_optarg_int_array(const char* optarg)
 #include "benchmark.h"
 
 #include "rife.h"
+#include "realesrgan.h"
 
 #include "filesystem_utils.h"
 
@@ -339,6 +340,8 @@ public:
     path_t output_dir;
 
     int frame_count;
+    bool realesr;
+    int scale;
 };
 
 void* load(void* args)
@@ -348,6 +351,8 @@ void* load(void* args)
     const int count = ltp->frame_count - 1;
     const path_t input_dir = ltp->input_dir;
     const path_t output_dir = ltp->output_dir;
+    const bool realesr = ltp->realesr;
+    const int scale = ltp->scale;
 
     // const path_t& image0path = ltp->input0_files[0];
     // const path_t& image1path = ltp->input1_files[0];
@@ -363,11 +368,20 @@ void* load(void* args)
         v.timestep = 0.5;
 
         int ret0 = decode_image(v.in0path, v.in0image, &v.webp0);
-        int ret1 = decode_image(v.in1path, v.in1image, &v.webp1);
+        // int ret1 = decode_image(v.in1path, v.in1image, &v.webp1);
 
-        v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
+        if (realesr)
+        {
+            v.outimage = ncnn::Mat(v.in0image.w * scale, v.in0image.h * scale, (size_t)3, 3);
+        }
+        else
+        {
+            int ret1 = decode_image(v.in1path, v.in1image, &v.webp1);
+            v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
+        }
         toproc.put(v);
     }
+    // todo
     else
     {
         #pragma omp parallel for schedule(static,1) num_threads(ltp->jobs_load)
@@ -384,15 +398,29 @@ void* load(void* args)
                 // get_frame_path(input_dir, "frame_", i + 1),
                 v.in0path, v.in0image, &v.webp0);
 
-            int ret1 = decode_image(
-                // get_frame_path(input_dir, "frame_", i + 2),
-                v.in1path, v.in1image, &v.webp1);
+            // int ret1 = decode_image(
+            //     // get_frame_path(input_dir, "frame_", i + 2),
+            //     v.in1path, v.in1image, &v.webp1);
 
-            if (ret0 != 0 || ret1 != 1)
+            if (realesr)
             {
-                v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
-                toproc.put(v);
+                v.outimage = ncnn::Mat(v.in0image.w * scale, v.in0image.h * scale, (size_t)3, 3);
             }
+            else
+            {
+                int ret1 = decode_image(
+                    // get_frame_path(input_dir, "frame_", i + 2),
+                    v.in1path, v.in1image, &v.webp1);
+
+                v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
+            }
+            toproc.put(v);
+
+            // if (ret0 != 0 || ret1 != 1)
+            // {
+            //     v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
+            //     toproc.put(v);
+            // }
 
             // const path_t& image0path = ltp->input0_files[i];
             // const path_t& image1path = ltp->input1_files[i];
@@ -422,12 +450,14 @@ class ProcThreadParams
 {
 public:
     const RIFE* rife;
+    const RealESRGAN* realesrgan;
 };
 
 void* proc(void* args)
 {
     const ProcThreadParams* ptp = (const ProcThreadParams*)args;
     const RIFE* rife = ptp->rife;
+    const RealESRGAN* realesrgan = ptp->realesrgan;
 
     for (;;)
     {
@@ -439,7 +469,14 @@ void* proc(void* args)
             break;
 
         auto start = std::chrono::high_resolution_clock::now();
-        rife->process(v.in0image, v.in1image, v.timestep, v.outimage);
+        if (realesrgan)
+        {
+            realesrgan->process(v.in0image, v.outimage);
+        }
+        else 
+        {
+            rife->process(v.in0image, v.in1image, v.timestep, v.outimage);
+        }
         auto stop = std::chrono::high_resolution_clock::now();
 
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
@@ -563,6 +600,7 @@ int main(int argc, char** argv)
     int tta_temporal_mode = 0;
     int uhd_mode = 0;
     path_t pattern_format = PATHSTR("%08d.png");
+    int scale = 4;
 
 #if _WIN32
     setlocale(LC_ALL, "");
@@ -641,8 +679,11 @@ int main(int argc, char** argv)
         case 'n':
             numframe = atoi(optarg);
             break;
+        // case 's':
+        //     timestep = atof(optarg);
+        //     break;
         case 's':
-            timestep = atof(optarg);
+            scale = atoi(optarg);
             break;
         case 'm':
             model = optarg;
@@ -762,6 +803,7 @@ int main(int argc, char** argv)
 
     bool rife_v2 = false;
     bool rife_v4 = false;
+    bool realesr = false;
     if (model.find(PATHSTR("rife-v2")) != path_t::npos)
     {
         // fine
@@ -780,6 +822,10 @@ int main(int argc, char** argv)
     else if (model.find(PATHSTR("rife")) != path_t::npos)
     {
         // fine
+    }
+    else if (model.find(PATHSTR("realesr")) != path_t::npos)
+    {
+        realesr = true;
     }
     else
     {
@@ -805,6 +851,14 @@ int main(int argc, char** argv)
         {
             frame_count = get_file_count(inputpath);
         }
+        else if (!inputpath.empty() && !path_is_directory(inputpath) && !outputpath.empty() && !path_is_directory(outputpath))
+        {
+            input0_files.push_back(inputpath);
+            input1_files.push_back(inputpath);
+            output_files.push_back(outputpath);
+            timesteps.push_back(0);
+        }
+        // else if (inputpath.empty() && !path_is_directory(input0path) && !path_is_directory(input1path) && !path_is_directory(outputpath))
         else if (inputpath.empty() && !path_is_directory(input0path) && !path_is_directory(input1path) && !path_is_directory(outputpath))
         {
             input0_files.push_back(input0path);
@@ -900,6 +954,39 @@ int main(int argc, char** argv)
 
     path_t modeldir = sanitize_dirpath(model);
 
+    int prepadding = 10;
+    // int prepadding = 0;
+    // if (model.find(PATHSTR("models")) != path_t::npos
+    //     || model.find(PATHSTR("models2")) != path_t::npos)
+    // {
+    //     prepadding = 10;
+    // }
+    // else
+    // {
+    //     fprintf(stderr, "unknown model dir type\n");
+    //     return -1;
+    // }
+
+    path_t paramfullpath;
+    path_t modelfullpath;
+    
+    for (const auto& entry : fs::directory_iterator(model))
+    {
+        std::string filename = entry.path().filename().string();
+
+        if (filename.find(".param") != std::string::npos)
+        {
+            paramfullpath = sanitize_filepath(model + PATHSTR('/') + filename.c_str());
+        }
+        else if (filename.find(".bin") != std::string::npos)
+        {
+            modelfullpath = sanitize_filepath(model + PATHSTR('/') + filename.c_str());
+        }
+    }
+
+    // path_t paramfullpath = sanitize_filepath("../models/realesr-animevideov3-x4/realesr-animevideov3-x4.param");
+    // path_t modelfullpath = sanitize_filepath("../models/realesr-animevideov3-x4/realesr-animevideov3-x4.bin");
+
 #if _WIN32
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
 #endif
@@ -955,9 +1042,36 @@ int main(int argc, char** argv)
         {
             int num_threads = gpuid[i] == -1 ? jobs_proc[i] : 1;
 
-            rife[i] = new RIFE(gpuid[i], tta_mode, tta_temporal_mode, uhd_mode, num_threads, rife_v2, rife_v4);
+            if (realesr)
+            {
+                rife[i] = nullptr;
+            }
+            else
+            {
+                rife[i] = new RIFE(gpuid[i], tta_mode, tta_temporal_mode, uhd_mode, num_threads, rife_v2, rife_v4);
 
-            rife[i]->load(modeldir);
+                rife[i]->load(modeldir);
+            }
+        }
+
+        std::vector<RealESRGAN*> realesrgan(use_gpu_count);
+
+        for (int i=0; i<use_gpu_count; i++)
+        {
+            if (realesr)
+            {
+                realesrgan[i] = new RealESRGAN(gpuid[i], tta_mode);
+
+                realesrgan[i]->load(paramfullpath, modelfullpath);
+
+                realesrgan[i]->scale = scale;
+                realesrgan[i]->tilesize = 32;
+                realesrgan[i]->prepadding = prepadding;
+            }
+            else 
+            {
+                realesrgan[i] = nullptr;
+            }
         }
 
         // main routine
@@ -972,6 +1086,8 @@ int main(int argc, char** argv)
             ltp.input_dir = inputpath;
             ltp.output_dir = outputpath;
             ltp.frame_count = frame_count;
+            ltp.realesr = realesr;
+            ltp.scale = scale;
 
             ncnn::Thread load_thread(load, (void*)&ltp);
 
@@ -980,6 +1096,7 @@ int main(int argc, char** argv)
             for (int i=0; i<use_gpu_count; i++)
             {
                 ptp[i].rife = rife[i];
+                ptp[i].realesrgan = realesrgan[i];
             }
 
             std::vector<ncnn::Thread*> proc_threads(total_jobs_proc);
