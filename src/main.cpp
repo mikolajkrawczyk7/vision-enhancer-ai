@@ -577,7 +577,14 @@ void* save(void* args)
 // #if _WIN32
                 // fwprintf(stderr, L"%ls %ls %f -> %ls done\n", v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
 // #else
-                fprintf(stderr, "[%i ms] %s %s %f -> %s done\n", v.duration, v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
+                if (realesr)
+                {
+                    fprintf(stderr, "[%i ms] %s -> %s done\n", v.duration, v.in0path.c_str(), v.outpath.c_str());
+                }
+                else
+                {
+                    fprintf(stderr, "[%i ms] %s %s %f -> %s done\n", v.duration, v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
+                }
 // #endif
             }
         }
@@ -858,7 +865,14 @@ int main(int argc, char** argv)
     {
         if (!inputpath.empty() && path_is_directory(inputpath) && path_is_directory(outputpath))
         {
-            frame_count = get_file_count(inputpath);
+            if (realesr) 
+            {
+                frame_count = get_file_count(inputpath) + 1;
+            }
+            else
+            {
+                frame_count = get_file_count(inputpath);
+            }
         }
         else if (!inputpath.empty() && !path_is_directory(inputpath) && !outputpath.empty() && !path_is_directory(outputpath))
         {
