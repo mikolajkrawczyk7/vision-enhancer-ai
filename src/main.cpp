@@ -1085,12 +1085,24 @@ int main(int argc, char** argv)
         {
             if (realesr)
             {
+                int tilesize = 0;
+                uint32_t heap_budget = ncnn::get_gpu_device(gpuid[i])->get_heap_budget();
+
+                if (heap_budget > 1900)
+                    tilesize = 200;
+                else if (heap_budget > 550)
+                    tilesize = 100;
+                else if (heap_budget > 190)
+                    tilesize = 64;
+                else
+                    tilesize = 32;
+
                 realesrgan[i] = new RealESRGAN(gpuid[i], tta_mode);
 
                 realesrgan[i]->load(paramfullpath, modelfullpath);
 
                 realesrgan[i]->scale = scale;
-                realesrgan[i]->tilesize = 32;
+                realesrgan[i]->tilesize = tilesize;
                 realesrgan[i]->prepadding = prepadding;
             }
             else 
