@@ -391,7 +391,7 @@ void* load(void* args)
             v.id = i;
             v.in0path = get_frame_path(input_dir, "frame_", i + 1);
             v.in1path = get_frame_path(input_dir, "frame_", i + 2);
-            v.outpath = get_frame_path(input_dir, "frame_", i * 2 + 2);
+            v.outpath = get_frame_path(output_dir, "", i * 2 + 2);
             v.timestep = 0.5;
 
             int ret0 = decode_image(
