@@ -976,6 +976,22 @@ int main(int argc, char** argv)
     //     return -1;
     // }
 
+    fs::path model_path(model);
+    std::string dir_name = model_path.filename().string();
+
+    if (dir_name.find("x4"))
+    {
+        dir_name = 4;
+    }
+    else if (dir_name.find("x3"))
+    {
+        dir_name = 3;
+    }
+    else if (dir_name.find("x2"))
+    {
+        dir_name = 2;
+    }
+
     path_t paramfullpath;
     path_t modelfullpath;
     
