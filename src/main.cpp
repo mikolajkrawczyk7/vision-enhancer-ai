@@ -391,7 +391,14 @@ void* load(void* args)
             v.id = i;
             v.in0path = get_frame_path(input_dir, "frame_", i + 1);
             v.in1path = get_frame_path(input_dir, "frame_", i + 2);
-            v.outpath = get_frame_path(output_dir, "", i * 2 + 2);
+            if (realesr)
+            {
+                v.outpath = get_frame_path(output_dir, "", i + 1);
+            }
+            else 
+            {
+                v.outpath = get_frame_path(output_dir, "", i * 2 + 2);
+            }
             v.timestep = 0.5;
 
             int ret0 = decode_image(
@@ -494,6 +501,7 @@ public:
     int verbose;
     path_t input_dir;
     path_t output_dir;
+    bool realesr;
 };
 
 void* save(void* args)
@@ -502,6 +510,7 @@ void* save(void* args)
     const int verbose = stp->verbose;
     const path_t input_dir = stp->input_dir;
     const path_t output_dir = stp->output_dir;
+    const bool realesr = stp->realesr;
 
     for (;;)
     {
@@ -516,7 +525,7 @@ void* save(void* args)
             // get_frame_path(output_dir, "", v.id * 2 + 2),
             v.outpath, v.outimage);
 
-        if (v.id != -1)
+        if (v.id != -1 && !realesr)
         {
             if (v.id == 0)
             {
@@ -1123,6 +1132,7 @@ int main(int argc, char** argv)
             stp.verbose = verbose;
             stp.input_dir = inputpath;
             stp.output_dir = outputpath;
+            stp.realesr = realesr;
 
             std::vector<ncnn::Thread*> save_threads(jobs_save);
             for (int i=0; i<jobs_save; i++)
