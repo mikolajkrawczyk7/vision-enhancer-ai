@@ -991,19 +991,19 @@ int main(int argc, char** argv)
     // }
 
     fs::path model_path(model);
-    std::string dir_name = model_path.filename().string();
+    std::string dir_name = model_path.parent_path().filename().string();
 
-    if (dir_name.find("x4"))
+    if (dir_name.find("x4") != std::string::npos)
     {
-        dir_name = 4;
+        scale = 4;
     }
-    else if (dir_name.find("x3"))
+    else if (dir_name.find("x3") != std::string::npos)
     {
-        dir_name = 3;
+        scale = 3;
     }
-    else if (dir_name.find("x2"))
+    else if (dir_name.find("x2") != std::string::npos)
     {
-        dir_name = 2;
+        scale = 2;
     }
 
     path_t paramfullpath;
