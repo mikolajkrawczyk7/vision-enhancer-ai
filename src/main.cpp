@@ -265,7 +265,9 @@ public:
     ncnn::Mat in1image;
     ncnn::Mat outimage;
 
-    int duration;
+    int load_duration;
+    int proc_duration;
+    int save_duration;
 };
 
 class TaskQueue
@@ -367,6 +369,8 @@ void* load(void* args)
         v.outpath = ltp->output_files[0];
         v.timestep = 0.5;
 
+        auto start = std::chrono::high_resolution_clock::now();
+
         int ret0 = decode_image(v.in0path, v.in0image, &v.webp0);
         // int ret1 = decode_image(v.in1path, v.in1image, &v.webp1);
 
@@ -379,6 +383,12 @@ void* load(void* args)
             int ret1 = decode_image(v.in1path, v.in1image, &v.webp1);
             v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
         }
+
+        auto stop = std::chrono::high_resolution_clock::now();
+
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+        v.load_duration = duration.count();
+
         toproc.put(v);
     }
     // todo
@@ -401,6 +411,8 @@ void* load(void* args)
             }
             v.timestep = 0.5;
 
+            auto start = std::chrono::high_resolution_clock::now();
+
             int ret0 = decode_image(
                 // get_frame_path(input_dir, "frame_", i + 1),
                 v.in0path, v.in0image, &v.webp0);
@@ -421,6 +433,12 @@ void* load(void* args)
 
                 v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
             }
+
+            auto stop = std::chrono::high_resolution_clock::now();
+
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+            v.load_duration = duration.count();
+
             toproc.put(v);
 
             // if (ret0 != 0 || ret1 != 1)
@@ -476,6 +494,7 @@ void* proc(void* args)
             break;
 
         auto start = std::chrono::high_resolution_clock::now();
+
         if (realesrgan)
         {
             realesrgan->process(v.in0image, v.outimage);
@@ -484,10 +503,11 @@ void* proc(void* args)
         {
             rife->process(v.in0image, v.in1image, v.timestep, v.outimage);
         }
+
         auto stop = std::chrono::high_resolution_clock::now();
 
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-        v.duration = duration.count();
+        v.proc_duration = duration.count();
 
         tosave.put(v);
     }
@@ -521,6 +541,8 @@ void* save(void* args)
         if (v.id == -233)
             break;
 
+        auto start = std::chrono::high_resolution_clock::now();
+
         int ret = encode_image(
             // get_frame_path(output_dir, "", v.id * 2 + 2),
             v.outpath, v.outimage);
@@ -537,6 +559,11 @@ void* save(void* args)
                 get_frame_path(output_dir, "", v.id * 2 + 3),
                 v.in1image);
         }
+
+        auto stop = std::chrono::high_resolution_clock::now();
+
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+        v.save_duration = duration.count();
         
         // free input pixel data
         {
@@ -572,18 +599,19 @@ void* save(void* args)
 
         if (ret == 0)
         {
-            if (verbose && v.duration > 0)
+            if (verbose && v.proc_duration > 0)
             {
 // #if _WIN32
                 // fwprintf(stderr, L"%ls %ls %f -> %ls done\n", v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
 // #else
                 if (realesr)
                 {
-                    fprintf(stderr, "[%i ms] %s -> %s done\n", v.duration, v.in0path.c_str(), v.outpath.c_str());
+                    fprintf(stderr, "[Load: %i ms, Proc: %i ms, Save: %i ms] %s -> %s done\n", v.load_duration, v.proc_duration, v.save_duration, v.in0path.c_str(), v.outpath.c_str());
                 }
                 else
                 {
-                    fprintf(stderr, "[%i ms] %s %s %f -> %s done\n", v.duration, v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
+                    // fprintf(stderr, "[%i ms] %s %s %f -> %s done\n", v.duration, v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
+                    fprintf(stderr, "[Load: %i ms, Proc: %i ms, Save: %i ms] %s -> %s done\n", v.load_duration, v.proc_duration, v.save_duration, v.in0path.c_str(), v.outpath.c_str());
                 }
 // #endif
             }
