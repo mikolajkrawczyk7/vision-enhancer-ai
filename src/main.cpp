@@ -626,8 +626,7 @@ void* save(void* args)
                 }
                 else
                 {
-                    // fprintf(stderr, "[%i ms] %s %s %f -> %s done\n", v.duration, v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
-                    fprintf(stderr, "[%i:%i:%i ms] %s -> %s done\n", v.load_duration, v.proc_duration, v.save_duration, v.in0path.c_str(), v.outpath.c_str());
+                    fprintf(stderr, "[Load: %i ms, Proc: %i ms, Save: %i ms] %s %s %f -> %s done\n", v.load_duration, v.proc_duration, v.save_duration, v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
                 }
 // #endif
             }
