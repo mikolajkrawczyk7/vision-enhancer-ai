@@ -4,6 +4,7 @@
 #include <chrono>
 #include <iomanip>
 #include <filesystem>
+#include <opencv2/opencv.hpp>
 
 namespace fs = std::filesystem;
 
@@ -214,28 +215,32 @@ static int encode_image(const path_t& imagepath, const ncnn::Mat& image)
 {
     int success = 0;
 
-    path_t ext = get_file_extension(imagepath);
+    cv::Mat cv_image(image.h, image.w, CV_8UC3, image.data);
+    cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
+    success = cv::imwrite(imagepath, cv_image);
 
-    if (ext == PATHSTR("webp") || ext == PATHSTR("WEBP"))
-    {
-        success = webp_save(imagepath.c_str(), image.w, image.h, image.elempack, (const unsigned char*)image.data);
-    }
-    else if (ext == PATHSTR("png") || ext == PATHSTR("PNG"))
-    {
-#if _WIN32
-        success = wic_encode_image(imagepath.c_str(), image.w, image.h, image.elempack, image.data);
-#else
-        success = stbi_write_png(imagepath.c_str(), image.w, image.h, image.elempack, image.data, 0);
-#endif
-    }
-    else if (ext == PATHSTR("jpg") || ext == PATHSTR("JPG") || ext == PATHSTR("jpeg") || ext == PATHSTR("JPEG"))
-    {
-#if _WIN32
-        success = wic_encode_jpeg_image(imagepath.c_str(), image.w, image.h, image.elempack, image.data);
-#else
-        success = stbi_write_jpg(imagepath.c_str(), image.w, image.h, image.elempack, image.data, 100);
-#endif
-    }
+    // path_t ext = get_file_extension(imagepath);
+// 
+    // if (ext == PATHSTR("webp") || ext == PATHSTR("WEBP"))
+    // {
+        // success = webp_save(imagepath.c_str(), image.w, image.h, image.elempack, (const unsigned char*)image.data);
+    // }
+    // else if (ext == PATHSTR("png") || ext == PATHSTR("PNG"))
+    // {
+// #if _WIN32
+        // success = wic_encode_image(imagepath.c_str(), image.w, image.h, image.elempack, image.data);
+// #else
+        // success = stbi_write_png(imagepath.c_str(), image.w, image.h, image.elempack, image.data, 0);
+// #endif
+    // }
+    // else if (ext == PATHSTR("jpg") || ext == PATHSTR("JPG") || ext == PATHSTR("jpeg") || ext == PATHSTR("JPEG"))
+    // {
+// #if _WIN32
+        // success = wic_encode_jpeg_image(imagepath.c_str(), image.w, image.h, image.elempack, image.data);
+// #else
+        // success = stbi_write_jpg(imagepath.c_str(), image.w, image.h, image.elempack, image.data, 100);
+// #endif
+    // }
 
     if (!success)
     {
@@ -543,21 +548,32 @@ void* save(void* args)
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        int ret = encode_image(
-            // get_frame_path(output_dir, "", v.id * 2 + 2),
-            v.outpath, v.outimage);
+        // int ret = encode_image(
+        //     // get_frame_path(output_dir, "", v.id * 2 + 2),
+        //     v.outpath, v.outimage);
+
+        // cv::Mat cv_img(v.outimage.h, v.outimage.w, CV_8UC3, v.outimage.data);
+        // cv::cvtColor(cv_img, cv_img, cv::COLOR_BGR2RGB);
+        // cv::imwrite(v.outpath, cv_img);
+
+        // encode_image(v.outimage, v.outpath);
+        encode_image(v.outpath, v.outimage);
 
         if (v.id != -1 && !realesr)
         {
             if (v.id == 0)
             {
-                int ret0 = encode_image(
-                    get_frame_path(output_dir, "", v.id * 2 + 1),
-                    v.in0image);
+                // int ret0 = encode_image(
+                //     get_frame_path(output_dir, "", v.id * 2 + 1),
+                //     v.in0image);
+                encode_image(get_frame_path(output_dir, "", v.id * 2 + 1),
+                             v.in0image);
             }
-            int ret1 = encode_image(
-                get_frame_path(output_dir, "", v.id * 2 + 3),
-                v.in1image);
+            // int ret1 = encode_image(
+            //     get_frame_path(output_dir, "", v.id * 2 + 3),
+            //     v.in1image);
+            encode_image(get_frame_path(output_dir, "", v.id * 2 + 3),
+                         v.in0image);
         }
 
         auto stop = std::chrono::high_resolution_clock::now();
@@ -566,39 +582,39 @@ void* save(void* args)
         v.save_duration = duration.count();
         
         // free input pixel data
-        {
-            unsigned char* pixeldata = (unsigned char*)v.in0image.data;
-            if (v.webp0 == 1)
-            {
-                free(pixeldata);
-            }
-            else
-            {
-#if _WIN32
-                free(pixeldata);
-#else
-                stbi_image_free(pixeldata);
-#endif
-            }
-        }
-        {
-            unsigned char* pixeldata = (unsigned char*)v.in1image.data;
-            if (v.webp1 == 1)
-            {
-                free(pixeldata);
-            }
-            else
-            {
-#if _WIN32
-                free(pixeldata);
-#else
-                stbi_image_free(pixeldata);
-#endif
-            }
-        }
+        // {
+            // unsigned char* pixeldata = (unsigned char*)v.in0image.data;
+            // if (v.webp0 == 1)
+            // {
+                // free(pixeldata);
+            // }
+            // else
+            // {
+// #if _WIN32
+                // free(pixeldata);
+// #else
+                // stbi_image_free(pixeldata);
+// #endif
+            // }
+        // }
+        // {
+            // unsigned char* pixeldata = (unsigned char*)v.in1image.data;
+            // if (v.webp1 == 1)
+            // {
+                // free(pixeldata);
+            // }
+            // else
+            // {
+// #if _WIN32
+                // free(pixeldata);
+// #else
+                // stbi_image_free(pixeldata);
+// #endif
+            // }
+        // }
 
-        if (ret == 0)
-        {
+        // if (ret == 0)
+        // {
             if (verbose && v.proc_duration > 0)
             {
 // #if _WIN32
@@ -611,11 +627,11 @@ void* save(void* args)
                 else
                 {
                     // fprintf(stderr, "[%i ms] %s %s %f -> %s done\n", v.duration, v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
-                    fprintf(stderr, "[Load: %i ms, Proc: %i ms, Save: %i ms] %s -> %s done\n", v.load_duration, v.proc_duration, v.save_duration, v.in0path.c_str(), v.outpath.c_str());
+                    fprintf(stderr, "[%i:%i:%i ms] %s -> %s done\n", v.load_duration, v.proc_duration, v.save_duration, v.in0path.c_str(), v.outpath.c_str());
                 }
 // #endif
             }
-        }
+        // }
     }
 
     return 0;
