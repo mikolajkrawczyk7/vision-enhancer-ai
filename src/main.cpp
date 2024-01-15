@@ -142,58 +142,69 @@ static void print_usage()
     fprintf(stderr, "  -f pattern-format    output image filename pattern format (%%08d.jpg/png/webp, default=ext/%%08d.png)\n");
 }
 
-static int decode_image(const path_t& imagepath, ncnn::Mat& image, int* webp)
+// static int decode_image(const path_t& imagepath, ncnn::Mat& image, int* webp)
+static int decode_image(const path_t& imagepath, ncnn::Mat& image)
 {
-    *webp = 0;
+    // *webp = 0;
 
     unsigned char* pixeldata = 0;
     int w;
     int h;
     int c;
 
-#if _WIN32
-    FILE* fp = _wfopen(imagepath.c_str(), L"rb");
-#else
-    FILE* fp = fopen(imagepath.c_str(), "rb");
-#endif
-    if (fp)
-    {
-        // read whole file
-        unsigned char* filedata = 0;
-        int length = 0;
-        {
-            fseek(fp, 0, SEEK_END);
-            length = ftell(fp);
-            rewind(fp);
-            filedata = (unsigned char*)malloc(length);
-            if (filedata)
-            {
-                fread(filedata, 1, length, fp);
-            }
-            fclose(fp);
-        }
+    cv::Mat cv_image = cv::imread(imagepath);
+    cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
 
-        if (filedata)
-        {
-            pixeldata = webp_load(filedata, length, &w, &h, &c);
-            if (pixeldata)
-            {
-                *webp = 1;
-            }
-            else
-            {
-                // not webp, try jpg png etc.
-#if _WIN32
-                pixeldata = wic_decode_image(imagepath.c_str(), &w, &h, &c);
-#else // _WIN32
-                pixeldata = stbi_load_from_memory(filedata, length, &w, &h, &c, 3);
-                c = 3;
-#endif // _WIN32
-            }
+    w = cv_image.cols;
+    h = cv_image.rows;
+    c = cv_image.channels();
 
-            free(filedata);
-        }
-    }
+    pixeldata = (unsigned char*)malloc(w * h * c);
+    std::memcpy(pixeldata, cv_image.data, w * h * c);
+
+// #if _WIN32
+    // FILE* fp = _wfopen(imagepath.c_str(), L"rb");
+// #else
+    // FILE* fp = fopen(imagepath.c_str(), "rb");
+// #endif
+    // if (fp)
+    // {
+        // // read whole file
+        // unsigned char* filedata = 0;
+        // int length = 0;
+        // {
+            // fseek(fp, 0, SEEK_END);
+            // length = ftell(fp);
+            // rewind(fp);
+            // filedata = (unsigned char*)malloc(length);
+            // if (filedata)
+            // {
+                // fread(filedata, 1, length, fp);
+            // }
+            // fclose(fp);
+        // }
+// 
+        // if (filedata)
+        // {
+            // pixeldata = webp_load(filedata, length, &w, &h, &c);
+            // if (pixeldata)
+            // {
+                // *webp = 1;
+            // }
+            // else
+            // {
+                // // not webp, try jpg png etc.
+// #if _WIN32
+                // pixeldata = wic_decode_image(imagepath.c_str(), &w, &h, &c);
+// #else // _WIN32
+                // pixeldata = stbi_load_from_memory(filedata, length, &w, &h, &c, 3);
+                // c = 3;
+// #endif // _WIN32
+            // }
+// 
+            // free(filedata);
+        // }
+    // }
 
     if (!pixeldata)
     {
@@ -376,7 +387,8 @@ void* load(void* args)
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        int ret0 = decode_image(v.in0path, v.in0image, &v.webp0);
+        // int ret0 = decode_image(v.in0path, v.in0image, &v.webp0);
+        int ret0 = decode_image(v.in0path, v.in0image);
         // int ret1 = decode_image(v.in1path, v.in1image, &v.webp1);
 
         if (realesr)
@@ -385,7 +397,8 @@ void* load(void* args)
         }
         else
         {
-            int ret1 = decode_image(v.in1path, v.in1image, &v.webp1);
+            // int ret1 = decode_image(v.in1path, v.in1image, &v.webp1);
+            int ret1 = decode_image(v.in1path, v.in1image);
             v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
         }
 
@@ -418,9 +431,11 @@ void* load(void* args)
 
             auto start = std::chrono::high_resolution_clock::now();
 
-            int ret0 = decode_image(
-                // get_frame_path(input_dir, "frame_", i + 1),
-                v.in0path, v.in0image, &v.webp0);
+            // int ret0 = decode_image(
+            //     // get_frame_path(input_dir, "frame_", i + 1),
+            //     v.in0path, v.in0image, &v.webp0);
+            // std::cout << v.in0image.elemsize << ' ' << v.in0image.elempack << '\n';
+            int ret0 = decode_image(v.in0path, v.in0image);
 
             // int ret1 = decode_image(
             //     // get_frame_path(input_dir, "frame_", i + 2),
@@ -434,7 +449,8 @@ void* load(void* args)
             {
                 int ret1 = decode_image(
                     // get_frame_path(input_dir, "frame_", i + 2),
-                    v.in1path, v.in1image, &v.webp1);
+                    // v.in1path, v.in1image, &v.webp1);
+                    v.in1path, v.in1image);
 
                 v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
             }
