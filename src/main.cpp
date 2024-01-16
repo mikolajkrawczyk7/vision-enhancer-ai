@@ -142,6 +142,38 @@ static void print_usage()
     fprintf(stderr, "  -f pattern-format    output image filename pattern format (%%08d.jpg/png/webp, default=ext/%%08d.png)\n");
 }
 
+static int decode_frame(cv::VideoCapture& cap, int i, ncnn::Mat& image)
+{
+    cap.set(cv::CAP_PROP_POS_FRAMES, i);
+
+    cv::Mat cv_image;
+    cap.read(cv_image);
+
+    cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
+
+    int w = cv_image.cols;
+    int h = cv_image.rows;
+    int c = cv_image.channels();
+
+    unsigned char* pixeldata = (unsigned char*)malloc(w * h * c);
+    std::memcpy(pixeldata, cv_image.data, w * h * c);
+
+    if (!pixeldata)
+    {
+#if _WIN32
+        fwprintf(stderr, L"decode image %ls failed\n", imagepath.c_str());
+#else // _WIN32
+        fprintf(stderr, "decode frame %i failed\n", i);
+#endif // _WIN32
+
+        return -1;
+    }
+
+    image = ncnn::Mat(w, h, (void*)pixeldata, (size_t)3, 3);
+
+    return 0;
+}
+
 // static int decode_image(const path_t& imagepath, ncnn::Mat& image, int* webp)
 static int decode_image(const path_t& imagepath, ncnn::Mat& image)
 {
@@ -360,6 +392,7 @@ public:
     int frame_count;
     bool realesr;
     int scale;
+    bool is_video;
 };
 
 void* load(void* args)
@@ -371,10 +404,13 @@ void* load(void* args)
     const path_t output_dir = ltp->output_dir;
     const bool realesr = ltp->realesr;
     const int scale = ltp->scale;
+    const bool is_video = ltp->is_video;
 
     // const path_t& image0path = ltp->input0_files[0];
     // const path_t& image1path = ltp->input1_files[0];
     // const path_t& outputpath = ltp->output_files[0];
+
+    // cv::VideoCapture cap("../data/video.mp4");
 
     if (ltp->output_files.size() > 0)
     {
@@ -412,6 +448,15 @@ void* load(void* args)
     // todo
     else
     {
+        cv::VideoCapture cap;
+
+        if (is_video)
+        {
+            // vid path
+            std::cout << is_video << '\n';
+            cap = cv::VideoCapture("../data/video.mp4");
+        }
+
         #pragma omp parallel for schedule(static,1) num_threads(ltp->jobs_load)
         for (int i=0; i<count; i++)
         {
@@ -435,7 +480,34 @@ void* load(void* args)
             //     // get_frame_path(input_dir, "frame_", i + 1),
             //     v.in0path, v.in0image, &v.webp0);
             // std::cout << v.in0image.elemsize << ' ' << v.in0image.elempack << '\n';
-            int ret0 = decode_image(v.in0path, v.in0image);
+            
+            // valid
+            if (is_video)
+            {
+                int ret0 = decode_frame(cap, i, v.in0image);
+            }
+            else
+            {
+                int ret0 = decode_image(v.in0path, v.in0image);
+            }
+
+            // int ret0 = decode_image(v.in0path, v.in0image);
+
+            // cap.set(cv::CAP_PROP_POS_FRAMES, i + 1);
+            // cv::Mat cv_image;
+            // cap.read(cv_image);
+
+            // // cv::Mat cv_image = cv::imread(imagepath);
+            // cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
+
+            // int w = cv_image.cols;
+            // int h = cv_image.rows;
+            // int c = cv_image.channels();
+
+            // unsigned char* pixeldata = (unsigned char*)malloc(w * h * c);
+            // std::memcpy(pixeldata, cv_image.data, w * h * c);
+
+            // v.in0image = ncnn::Mat(w, h, (void*)pixeldata, (size_t)3, 3);
 
             // int ret1 = decode_image(
             //     // get_frame_path(input_dir, "frame_", i + 2),
@@ -447,10 +519,17 @@ void* load(void* args)
             }
             else
             {
-                int ret1 = decode_image(
-                    // get_frame_path(input_dir, "frame_", i + 2),
-                    // v.in1path, v.in1image, &v.webp1);
-                    v.in1path, v.in1image);
+                if (is_video)
+                {
+                    int ret1 = decode_frame(cap, i + 1, v.in1image);
+                }
+                else
+                {
+                    int ret1 = decode_image(
+                        // get_frame_path(input_dir, "frame_", i + 2),
+                        // v.in1path, v.in1image, &v.webp1);
+                        v.in1path, v.in1image);
+                }
 
                 v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
             }
@@ -915,6 +994,7 @@ int main(int argc, char** argv)
     }
 
     int frame_count = 0;
+    bool is_video = false;
 
     // collect input and output filepath
     std::vector<path_t> input0_files;
@@ -931,6 +1011,18 @@ int main(int argc, char** argv)
             else
             {
                 frame_count = get_file_count(inputpath);
+            }
+        }
+        else if (!path_is_directory(inputpath) && path_is_directory(outputpath))
+        {
+            if (inputpath.find(".mp4") != std::string::npos)
+            {
+                cv::VideoCapture cap(inputpath);
+                frame_count = cap.get(cv::CAP_PROP_FRAME_COUNT);
+                std::cout << "detected video file .mp4\n";
+                std::cout << frame_count << '\n';
+                cap.release();
+                is_video = true;
             }
         }
         else if (!inputpath.empty() && !path_is_directory(inputpath) && !outputpath.empty() && !path_is_directory(outputpath))
@@ -1198,6 +1290,7 @@ int main(int argc, char** argv)
             ltp.frame_count = frame_count;
             ltp.realesr = realesr;
             ltp.scale = scale;
+            ltp.is_video = is_video;
 
             ncnn::Thread load_thread(load, (void*)&ltp);
 
