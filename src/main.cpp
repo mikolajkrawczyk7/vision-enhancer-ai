@@ -454,7 +454,7 @@ void* load(void* args)
         {
             // vid path
             std::cout << is_video << '\n';
-            cap = cv::VideoCapture("../data/video.mp4");
+            cap = cv::VideoCapture(input_dir);
         }
 
         #pragma omp parallel for schedule(static,1) num_threads(ltp->jobs_load)
@@ -656,6 +656,7 @@ void* save(void* args)
 
         if (v.id != -1 && !realesr)
         {
+            // copy instead encoding
             if (v.id == 0)
             {
                 // int ret0 = encode_image(
