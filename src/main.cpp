@@ -622,6 +622,7 @@ public:
     path_t input_dir;
     path_t output_dir;
     bool realesr;
+    bool is_video;
 };
 
 void* save(void* args)
@@ -631,17 +632,17 @@ void* save(void* args)
     const path_t input_dir = stp->input_dir;
     const path_t output_dir = stp->output_dir;
     const bool realesr = stp->realesr;
+    const bool is_video = stp->is_video;
 
-    // new shit
-    cv::VideoCapture cap("../data/video.mp4");
+    // cv::VideoCapture cap("../data/video.mp4");
     // if (!cap.isOpened()) {
     //     std::cout << "Error opening video stream or file" << std::endl;
     //     return -1;
     // }
 
     // Define the codec and create a VideoWriter object
-    int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-    cv::VideoWriter out("output.avi", fourcc, 30.0, cv::Size(cap.get(cv::CAP_PROP_FRAME_WIDTH), cap.get(cv::CAP_PROP_FRAME_HEIGHT)));
+    // int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
+    // cv::VideoWriter out("output.avi", fourcc, 30.0, cv::Size(cap.get(cv::CAP_PROP_FRAME_WIDTH), cap.get(cv::CAP_PROP_FRAME_HEIGHT)));
 
     for (;;)
     {
@@ -665,11 +666,10 @@ void* save(void* args)
         // encode_image(v.outimage, v.outpath);
         encode_image(v.outpath, v.outimage);
 
-        // new shit
-        cv::Mat cv_image(v.outimage.h, v.outimage.w, CV_8UC3, v.outimage.data);
+        // cv::Mat cv_image(v.outimage.h, v.outimage.w, CV_8UC3, v.outimage.data);
         // cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
         // success = cv::imwrite(imagepath, cv_image);
-        out.write(cv_image);
+        // out.write(cv_image);
 
         if (v.id != -1 && !realesr)
         {
@@ -679,14 +679,36 @@ void* save(void* args)
                 // int ret0 = encode_image(
                 //     get_frame_path(output_dir, "", v.id * 2 + 1),
                 //     v.in0image);
-                encode_image(get_frame_path(output_dir, "", v.id * 2 + 1),
-                             v.in0image);
+                if (is_video)
+                {
+                    encode_image(get_frame_path(output_dir, "", v.id * 2 + 1),
+                                 v.in0image);
+                }
+                else 
+                {
+                    fs::copy_file(
+                        get_frame_path(input_dir, "frame_", v.id * 2 + 1),
+                        get_frame_path(output_dir, "", v.id * 2 + 1),
+                        fs::copy_options::overwrite_existing
+                    );
+                }
             }
             // int ret1 = encode_image(
             //     get_frame_path(output_dir, "", v.id * 2 + 3),
             //     v.in1image);
-            encode_image(get_frame_path(output_dir, "", v.id * 2 + 3),
-                         v.in0image);
+            if (is_video)
+            {
+                encode_image(get_frame_path(output_dir, "", v.id * 2 + 3),
+                             v.in0image);
+            }
+            else
+            {
+                fs::copy_file(
+                    get_frame_path(input_dir, "frame_", v.id * 2 + 3),
+                    get_frame_path(output_dir, "", v.id * 2 + 3),
+                    fs::copy_options::overwrite_existing
+                );
+            }
         }
 
         auto stop = std::chrono::high_resolution_clock::now();
@@ -1345,6 +1367,7 @@ int main(int argc, char** argv)
             stp.input_dir = inputpath;
             stp.output_dir = outputpath;
             stp.realesr = realesr;
+            stp.is_video = is_video;
 
             std::vector<ncnn::Thread*> save_threads(jobs_save);
             for (int i=0; i<jobs_save; i++)
