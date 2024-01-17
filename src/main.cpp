@@ -372,7 +372,7 @@ void* load(void* args)
             cap = cv::VideoCapture(input_dir);
         }
 
-        #pragma omp parallel for schedule(static,1) num_threads(ltp->jobs_load)
+        // #pragma omp parallel for schedule(static,1) num_threads(ltp->jobs_load)
         for (int i=0; i<count; i++)
         {
             Task v;
@@ -418,7 +418,6 @@ void* load(void* args)
                 {
                     int ret1 = decode_image(v.in1path, v.in1image);
                 }
-
                 v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
             }
 
@@ -528,6 +527,7 @@ void* save(void* args)
                     );
                 }
             }
+
             if (is_video)
             {
                 encode_image(get_frame_path(output_dir, "", v.id * 2 + 3),
@@ -563,7 +563,6 @@ void* save(void* args)
 
     return 0;
 }
-
 
 #if _WIN32
 int wmain(int argc, wchar_t** argv)
