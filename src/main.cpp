@@ -149,8 +149,6 @@ static int decode_frame(cv::VideoCapture& cap, int i, ncnn::Mat& image)
     cv::Mat cv_image;
     cap.read(cv_image);
 
-    // cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
-
     int w = cv_image.cols;
     int h = cv_image.rows;
     int c = cv_image.channels();
@@ -174,18 +172,14 @@ static int decode_frame(cv::VideoCapture& cap, int i, ncnn::Mat& image)
     return 0;
 }
 
-// static int decode_image(const path_t& imagepath, ncnn::Mat& image, int* webp)
 static int decode_image(const path_t& imagepath, ncnn::Mat& image)
 {
-    // *webp = 0;
-
     unsigned char* pixeldata = 0;
     int w;
     int h;
     int c;
 
     cv::Mat cv_image = cv::imread(imagepath);
-    // cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
 
     w = cv_image.cols;
     h = cv_image.rows;
@@ -193,50 +187,6 @@ static int decode_image(const path_t& imagepath, ncnn::Mat& image)
 
     pixeldata = (unsigned char*)malloc(w * h * c);
     std::memcpy(pixeldata, cv_image.data, w * h * c);
-
-// #if _WIN32
-    // FILE* fp = _wfopen(imagepath.c_str(), L"rb");
-// #else
-    // FILE* fp = fopen(imagepath.c_str(), "rb");
-// #endif
-    // if (fp)
-    // {
-        // // read whole file
-        // unsigned char* filedata = 0;
-        // int length = 0;
-        // {
-            // fseek(fp, 0, SEEK_END);
-            // length = ftell(fp);
-            // rewind(fp);
-            // filedata = (unsigned char*)malloc(length);
-            // if (filedata)
-            // {
-                // fread(filedata, 1, length, fp);
-            // }
-            // fclose(fp);
-        // }
-// 
-        // if (filedata)
-        // {
-            // pixeldata = webp_load(filedata, length, &w, &h, &c);
-            // if (pixeldata)
-            // {
-                // *webp = 1;
-            // }
-            // else
-            // {
-                // // not webp, try jpg png etc.
-// #if _WIN32
-                // pixeldata = wic_decode_image(imagepath.c_str(), &w, &h, &c);
-// #else // _WIN32
-                // pixeldata = stbi_load_from_memory(filedata, length, &w, &h, &c, 3);
-                // c = 3;
-// #endif // _WIN32
-            // }
-// 
-            // free(filedata);
-        // }
-    // }
 
     if (!pixeldata)
     {
@@ -259,31 +209,7 @@ static int encode_image(const path_t& imagepath, const ncnn::Mat& image)
     int success = 0;
 
     cv::Mat cv_image(image.h, image.w, CV_8UC3, image.data);
-    // cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
     success = cv::imwrite(imagepath, cv_image);
-
-    // path_t ext = get_file_extension(imagepath);
-// 
-    // if (ext == PATHSTR("webp") || ext == PATHSTR("WEBP"))
-    // {
-        // success = webp_save(imagepath.c_str(), image.w, image.h, image.elempack, (const unsigned char*)image.data);
-    // }
-    // else if (ext == PATHSTR("png") || ext == PATHSTR("PNG"))
-    // {
-// #if _WIN32
-        // success = wic_encode_image(imagepath.c_str(), image.w, image.h, image.elempack, image.data);
-// #else
-        // success = stbi_write_png(imagepath.c_str(), image.w, image.h, image.elempack, image.data, 0);
-// #endif
-    // }
-    // else if (ext == PATHSTR("jpg") || ext == PATHSTR("JPG") || ext == PATHSTR("jpeg") || ext == PATHSTR("JPEG"))
-    // {
-// #if _WIN32
-        // success = wic_encode_jpeg_image(imagepath.c_str(), image.w, image.h, image.elempack, image.data);
-// #else
-        // success = stbi_write_jpg(imagepath.c_str(), image.w, image.h, image.elempack, image.data, 100);
-// #endif
-    // }
 
     if (!success)
     {
@@ -398,19 +324,12 @@ public:
 void* load(void* args)
 {
     const LoadThreadParams* ltp = (const LoadThreadParams*)args;
-    // const int count = ltp->output_files.size();
     const int count = ltp->frame_count - 1;
     const path_t input_dir = ltp->input_dir;
     const path_t output_dir = ltp->output_dir;
     const bool realesr = ltp->realesr;
     const int scale = ltp->scale;
     const bool is_video = ltp->is_video;
-
-    // const path_t& image0path = ltp->input0_files[0];
-    // const path_t& image1path = ltp->input1_files[0];
-    // const path_t& outputpath = ltp->output_files[0];
-
-    // cv::VideoCapture cap("../data/video.mp4");
 
     if (ltp->output_files.size() > 0)
     {
@@ -423,9 +342,7 @@ void* load(void* args)
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        // int ret0 = decode_image(v.in0path, v.in0image, &v.webp0);
         int ret0 = decode_image(v.in0path, v.in0image);
-        // int ret1 = decode_image(v.in1path, v.in1image, &v.webp1);
 
         if (realesr)
         {
@@ -433,7 +350,6 @@ void* load(void* args)
         }
         else
         {
-            // int ret1 = decode_image(v.in1path, v.in1image, &v.webp1);
             int ret1 = decode_image(v.in1path, v.in1image);
             v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
         }
@@ -445,15 +361,12 @@ void* load(void* args)
 
         toproc.put(v);
     }
-    // todo
     else
     {
         cv::VideoCapture cap;
 
         if (is_video)
         {
-            // vid path
-            std::cout << is_video << '\n';
             cap = cv::VideoCapture(input_dir);
         }
 
@@ -476,12 +389,6 @@ void* load(void* args)
 
             auto start = std::chrono::high_resolution_clock::now();
 
-            // int ret0 = decode_image(
-            //     // get_frame_path(input_dir, "frame_", i + 1),
-            //     v.in0path, v.in0image, &v.webp0);
-            // std::cout << v.in0image.elemsize << ' ' << v.in0image.elempack << '\n';
-            
-            // valid
             if (is_video)
             {
                 int ret0 = decode_frame(cap, i, v.in0image);
@@ -490,28 +397,6 @@ void* load(void* args)
             {
                 int ret0 = decode_image(v.in0path, v.in0image);
             }
-
-            // int ret0 = decode_image(v.in0path, v.in0image);
-
-            // cap.set(cv::CAP_PROP_POS_FRAMES, i + 1);
-            // cv::Mat cv_image;
-            // cap.read(cv_image);
-
-            // // cv::Mat cv_image = cv::imread(imagepath);
-            // cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
-
-            // int w = cv_image.cols;
-            // int h = cv_image.rows;
-            // int c = cv_image.channels();
-
-            // unsigned char* pixeldata = (unsigned char*)malloc(w * h * c);
-            // std::memcpy(pixeldata, cv_image.data, w * h * c);
-
-            // v.in0image = ncnn::Mat(w, h, (void*)pixeldata, (size_t)3, 3);
-
-            // int ret1 = decode_image(
-            //     // get_frame_path(input_dir, "frame_", i + 2),
-            //     v.in1path, v.in1image, &v.webp1);
 
             if (realesr)
             {
@@ -526,8 +411,6 @@ void* load(void* args)
                 else
                 {
                     int ret1 = decode_image(
-                        // get_frame_path(input_dir, "frame_", i + 2),
-                        // v.in1path, v.in1image, &v.webp1);
                         v.in1path, v.in1image);
                 }
 
@@ -540,31 +423,6 @@ void* load(void* args)
             v.load_duration = duration.count();
 
             toproc.put(v);
-
-            // if (ret0 != 0 || ret1 != 1)
-            // {
-            //     v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
-            //     toproc.put(v);
-            // }
-
-            // const path_t& image0path = ltp->input0_files[i];
-            // const path_t& image1path = ltp->input1_files[i];
-
-            // Task v;
-            // v.id = i;
-            // v.in0path = image0path;
-            // v.in1path = image1path;
-            // v.outpath = ltp->output_files[i];
-            // v.timestep = ltp->timesteps[i];
-
-            // int ret0 = decode_image(image0path, v.in0image, &v.webp0);
-            // int ret1 = decode_image(image1path, v.in1image, &v.webp1);
-
-            // if (ret0 != 0 || ret1 != 1)
-            // {
-            //     v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
-            //     toproc.put(v);
-            // }
         }
     }
 
@@ -634,16 +492,6 @@ void* save(void* args)
     const bool realesr = stp->realesr;
     const bool is_video = stp->is_video;
 
-    // cv::VideoCapture cap("../data/video.mp4");
-    // if (!cap.isOpened()) {
-    //     std::cout << "Error opening video stream or file" << std::endl;
-    //     return -1;
-    // }
-
-    // Define the codec and create a VideoWriter object
-    // int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-    // cv::VideoWriter out("output.avi", fourcc, 30.0, cv::Size(cap.get(cv::CAP_PROP_FRAME_WIDTH), cap.get(cv::CAP_PROP_FRAME_HEIGHT)));
-
     for (;;)
     {
         Task v;
@@ -655,30 +503,12 @@ void* save(void* args)
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        // int ret = encode_image(
-        //     // get_frame_path(output_dir, "", v.id * 2 + 2),
-        //     v.outpath, v.outimage);
-
-        // cv::Mat cv_img(v.outimage.h, v.outimage.w, CV_8UC3, v.outimage.data);
-        // cv::cvtColor(cv_img, cv_img, cv::COLOR_BGR2RGB);
-        // cv::imwrite(v.outpath, cv_img);
-
-        // encode_image(v.outimage, v.outpath);
         encode_image(v.outpath, v.outimage);
-
-        // cv::Mat cv_image(v.outimage.h, v.outimage.w, CV_8UC3, v.outimage.data);
-        // cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
-        // success = cv::imwrite(imagepath, cv_image);
-        // out.write(cv_image);
 
         if (v.id != -1 && !realesr)
         {
-            // copy instead encoding
             if (v.id == 0)
             {
-                // int ret0 = encode_image(
-                //     get_frame_path(output_dir, "", v.id * 2 + 1),
-                //     v.in0image);
                 if (is_video)
                 {
                     encode_image(get_frame_path(output_dir, "", v.id * 2 + 1),
@@ -693,13 +523,8 @@ void* save(void* args)
                     );
                 }
             }
-            // int ret1 = encode_image(
-            //     get_frame_path(output_dir, "", v.id * 2 + 3),
-            //     v.in1image);
             if (is_video)
             {
-                // encode_image(get_frame_path(output_dir, "", v.id * 2 + 3),
-                //              v.in0image);
                 encode_image(get_frame_path(output_dir, "", v.id * 2 + 3),
                              v.in1image);
             }
@@ -718,56 +543,17 @@ void* save(void* args)
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
         v.save_duration = duration.count();
         
-        // free input pixel data
-        // {
-            // unsigned char* pixeldata = (unsigned char*)v.in0image.data;
-            // if (v.webp0 == 1)
-            // {
-                // free(pixeldata);
-            // }
-            // else
-            // {
-// #if _WIN32
-                // free(pixeldata);
-// #else
-                // stbi_image_free(pixeldata);
-// #endif
-            // }
-        // }
-        // {
-            // unsigned char* pixeldata = (unsigned char*)v.in1image.data;
-            // if (v.webp1 == 1)
-            // {
-                // free(pixeldata);
-            // }
-            // else
-            // {
-// #if _WIN32
-                // free(pixeldata);
-// #else
-                // stbi_image_free(pixeldata);
-// #endif
-            // }
-        // }
-
-        // if (ret == 0)
-        // {
-            if (verbose && v.proc_duration > 0)
+        if (verbose && v.proc_duration > 0)
+        {
+            if (realesr)
             {
-// #if _WIN32
-                // fwprintf(stderr, L"%ls %ls %f -> %ls done\n", v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
-// #else
-                if (realesr)
-                {
-                    fprintf(stderr, "[Load: %i ms, Proc: %i ms, Save: %i ms] %s -> %s done\n", v.load_duration, v.proc_duration, v.save_duration, v.in0path.c_str(), v.outpath.c_str());
-                }
-                else
-                {
-                    fprintf(stderr, "[Load: %i ms, Proc: %i ms, Save: %i ms] %s %s %f -> %s done\n", v.load_duration, v.proc_duration, v.save_duration, v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
-                }
-// #endif
+                fprintf(stderr, "[Load: %i ms, Proc: %i ms, Save: %i ms] %s -> %s done\n", v.load_duration, v.proc_duration, v.save_duration, v.in0path.c_str(), v.outpath.c_str());
             }
-        // }
+            else
+            {
+                fprintf(stderr, "[Load: %i ms, Proc: %i ms, Save: %i ms] %s %s %f -> %s done\n", v.load_duration, v.proc_duration, v.save_duration, v.in0path.c_str(), v.in1path.c_str(), v.timestep, v.outpath.c_str());
+            }
+        }
     }
 
     return 0;
@@ -1061,8 +847,6 @@ int main(int argc, char** argv)
             {
                 cv::VideoCapture cap(inputpath);
                 frame_count = cap.get(cv::CAP_PROP_FRAME_COUNT);
-                std::cout << "detected video file .mp4\n";
-                std::cout << frame_count << '\n';
                 cap.release();
                 is_video = true;
             }
@@ -1074,7 +858,6 @@ int main(int argc, char** argv)
             output_files.push_back(outputpath);
             timesteps.push_back(0);
         }
-        // else if (inputpath.empty() && !path_is_directory(input0path) && !path_is_directory(input1path) && !path_is_directory(outputpath))
         else if (inputpath.empty() && !path_is_directory(input0path) && !path_is_directory(input1path) && !path_is_directory(outputpath))
         {
             input0_files.push_back(input0path);
@@ -1089,99 +872,9 @@ int main(int argc, char** argv)
             return -1;
         }
     }
-    // int frame_count = get_file_count(inputpath);
-
-    // collect input and output filepath
-    // std::vector<path_t> input0_files;
-    // std::vector<path_t> input1_files;
-    // std::vector<path_t> output_files;
-    // std::vector<float> timesteps;
-    // {
-        // if (!inputpath.empty() && path_is_directory(inputpath) && path_is_directory(outputpath))
-        // {
-            // std::vector<path_t> filenames;
-            // int lr = list_directory(inputpath, filenames);
-            // if (lr != 0)
-                // return -1;
-// 
-            // const int count = filenames.size();
-            // if (numframe == 0)
-                // numframe = count * 2;
-// 
-            // input0_files.resize(numframe);
-            // input1_files.resize(numframe);
-            // output_files.resize(numframe);
-            // timesteps.resize(numframe);
-// 
-            // double scale = (double)count / numframe;
-            // for (int i=0; i<numframe; i++)
-            // {
-                // // TODO provide option to control timestep interpolate method
-// //                 float fx = (float)((i + 0.5) * scale - 0.5);
-                // float fx = i * scale;
-                // int sx = static_cast<int>(floor(fx));
-                // fx -= sx;
-// 
-                // if (sx < 0)
-                // {
-                    // sx = 0;
-                    // fx = 0.f;
-                // }
-                // if (sx >= count - 1)
-                // {
-                    // sx = count - 2;
-                    // fx = 1.f;
-                // }
-// 
-// //                 fprintf(stderr, "%d %f %d\n", i, fx, sx);
-// 
-                // path_t filename0 = filenames[sx];
-                // path_t filename1 = filenames[sx + 1];
-// 
-// #if _WIN32
-                // wchar_t tmp[256];
-                // swprintf(tmp, pattern.c_str(), i+1);
-// #else
-                // char tmp[256];
-                // sprintf(tmp, pattern.c_str(), i+1); // ffmpeg start from 1
-// #endif
-                // path_t output_filename = path_t(tmp) + PATHSTR('.') + format;
-// 
-                // input0_files[i] = inputpath + PATHSTR('/') + filename0;
-                // input1_files[i] = inputpath + PATHSTR('/') + filename1;
-                // output_files[i] = outputpath + PATHSTR('/') + output_filename;
-                // timesteps[i] = fx;
-            // }
-        // }
-        // else if (inputpath.empty() && !path_is_directory(input0path) && !path_is_directory(input1path) && !path_is_directory(outputpath))
-        // {
-            // input0_files.push_back(input0path);
-            // input1_files.push_back(input1path);
-            // output_files.push_back(outputpath);
-            // timesteps.push_back(timestep);
-        // }
-        // else
-        // {
-            // fprintf(stderr, "input0path, input1path and outputpath must be file at the same time\n");
-            // fprintf(stderr, "inputpath and outputpath must be directory at the same time\n");
-            // return -1;
-        // }
-    // }
-
     path_t modeldir = sanitize_dirpath(model);
 
     int prepadding = 10;
-    // int prepadding = 0;
-    // if (model.find(PATHSTR("models")) != path_t::npos
-    //     || model.find(PATHSTR("models2")) != path_t::npos)
-    // {
-    //     prepadding = 10;
-    // }
-    // else
-    // {
-    //     fprintf(stderr, "unknown model dir type\n");
-    //     return -1;
-    // }
 
     fs::path model_path(model);
     std::string dir_name = model_path.parent_path().filename().string();
@@ -1215,9 +908,6 @@ int main(int argc, char** argv)
             modelfullpath = sanitize_filepath(model + PATHSTR('/') + filename.c_str());
         }
     }
-
-    // path_t paramfullpath = sanitize_filepath("../models/realesr-animevideov3-x4/realesr-animevideov3-x4.param");
-    // path_t modelfullpath = sanitize_filepath("../models/realesr-animevideov3-x4/realesr-animevideov3-x4.bin");
 
 #if _WIN32
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
