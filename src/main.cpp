@@ -321,6 +321,8 @@ public:
     bool is_video;
 };
 
+ncnn::Mutex cv_lock;
+
 void* load(void* args)
 {
     const LoadThreadParams* ltp = (const LoadThreadParams*)args;
@@ -391,7 +393,9 @@ void* load(void* args)
 
             if (is_video)
             {
+                cv_lock.lock();
                 int ret0 = decode_frame(cap, i, v.in0image);
+                cv_lock.unlock();
             }
             else
             {
@@ -406,12 +410,13 @@ void* load(void* args)
             {
                 if (is_video)
                 {
+                    cv_lock.lock();
                     int ret1 = decode_frame(cap, i + 1, v.in1image);
+                    cv_lock.unlock();
                 }
                 else
                 {
-                    int ret1 = decode_image(
-                        v.in1path, v.in1image);
+                    int ret1 = decode_image(v.in1path, v.in1image);
                 }
 
                 v.outimage = ncnn::Mat(v.in0image.w, v.in0image.h, (size_t)3, 3);
