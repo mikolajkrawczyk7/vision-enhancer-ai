@@ -149,7 +149,7 @@ static int decode_frame(cv::VideoCapture& cap, int i, ncnn::Mat& image)
     cv::Mat cv_image;
     cap.read(cv_image);
 
-    cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
+    // cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
 
     int w = cv_image.cols;
     int h = cv_image.rows;
@@ -185,7 +185,7 @@ static int decode_image(const path_t& imagepath, ncnn::Mat& image)
     int c;
 
     cv::Mat cv_image = cv::imread(imagepath);
-    cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
+    // cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
 
     w = cv_image.cols;
     h = cv_image.rows;
@@ -259,7 +259,7 @@ static int encode_image(const path_t& imagepath, const ncnn::Mat& image)
     int success = 0;
 
     cv::Mat cv_image(image.h, image.w, CV_8UC3, image.data);
-    cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
+    // cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
     success = cv::imwrite(imagepath, cv_image);
 
     // path_t ext = get_file_extension(imagepath);
@@ -632,6 +632,17 @@ void* save(void* args)
     const path_t output_dir = stp->output_dir;
     const bool realesr = stp->realesr;
 
+    // new shit
+    cv::VideoCapture cap("../data/video.mp4");
+    // if (!cap.isOpened()) {
+    //     std::cout << "Error opening video stream or file" << std::endl;
+    //     return -1;
+    // }
+
+    // Define the codec and create a VideoWriter object
+    int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
+    cv::VideoWriter out("output.avi", fourcc, 30.0, cv::Size(cap.get(cv::CAP_PROP_FRAME_WIDTH), cap.get(cv::CAP_PROP_FRAME_HEIGHT)));
+
     for (;;)
     {
         Task v;
@@ -653,6 +664,12 @@ void* save(void* args)
 
         // encode_image(v.outimage, v.outpath);
         encode_image(v.outpath, v.outimage);
+
+        // new shit
+        cv::Mat cv_image(v.outimage.h, v.outimage.w, CV_8UC3, v.outimage.data);
+        // cv::cvtColor(cv_image, cv_image, cv::COLOR_BGR2RGB);
+        // success = cv::imwrite(imagepath, cv_image);
+        out.write(cv_image);
 
         if (v.id != -1 && !realesr)
         {
