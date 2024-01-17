@@ -687,7 +687,7 @@ void* save(void* args)
                 else 
                 {
                     fs::copy_file(
-                        get_frame_path(input_dir, "frame_", v.id * 2 + 1),
+                        get_frame_path(input_dir, "frame_", v.id + 1),
                         get_frame_path(output_dir, "", v.id * 2 + 1),
                         fs::copy_options::overwrite_existing
                     );
@@ -698,13 +698,15 @@ void* save(void* args)
             //     v.in1image);
             if (is_video)
             {
+                // encode_image(get_frame_path(output_dir, "", v.id * 2 + 3),
+                //              v.in0image);
                 encode_image(get_frame_path(output_dir, "", v.id * 2 + 3),
-                             v.in0image);
+                             v.in1image);
             }
             else
             {
                 fs::copy_file(
-                    get_frame_path(input_dir, "frame_", v.id * 2 + 3),
+                    get_frame_path(input_dir, "frame_", v.id + 2),
                     get_frame_path(output_dir, "", v.id * 2 + 3),
                     fs::copy_options::overwrite_existing
                 );
