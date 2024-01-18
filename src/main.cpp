@@ -28,24 +28,6 @@ int get_file_count(const std::string& path)
 #include <clocale>
 
 #if _WIN32
-// image decoder and encoder with wic
-#include "wic_image.h"
-#else // _WIN32
-// image decoder and encoder with stb
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_NO_PSD
-#define STBI_NO_TGA
-#define STBI_NO_GIF
-#define STBI_NO_HDR
-#define STBI_NO_PIC
-#define STBI_NO_STDIO
-#include "stb_image.h"
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
-#endif // _WIN32
-#include "webp_image.h"
-
-#if _WIN32
 #include <wchar.h>
 static wchar_t* optarg = NULL;
 static int optind = 1;
