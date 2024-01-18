@@ -11,11 +11,9 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(USE_SYSTEM_NCNN "build with system libncnn" OFF)
-option(USE_SYSTEM_WEBP "build with system libwebp" OFF)
 option(USE_STATIC_MOLTENVK "link moltenvk static library" OFF)
 
 find_package(Threads)
-find_package(OpenMP)
 find_package(Vulkan REQUIRED)
 find_package(OpenCV REQUIRED)
 
@@ -86,12 +84,6 @@ macro(rife_add_shader SHADER_SRC)
 endmacro()
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
-
-if(OPENMP_FOUND)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
-endif()
 
 # enable global link time optimization
 cmake_policy(SET CMP0069 NEW)
@@ -256,40 +248,6 @@ if(NOT USE_SYSTEM_NCNN)
     add_subdirectory(ncnn)
 endif()
 
-if(USE_SYSTEM_WEBP)
-    set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
-    find_package(WebP)
-    if(NOT TARGET webp)
-        message(WARNING "webp target not found! USE_SYSTEM_WEBP will be turned off.")
-        set(USE_SYSTEM_WEBP OFF)
-    endif()
-endif()
-
-if(NOT USE_SYSTEM_WEBP)
-    # build libwebp library
-    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libwebp/CMakeLists.txt")
-        message(FATAL_ERROR "The submodules were not downloaded! Please update submodules with \"git submodule update --init --recursive\" and try again.")
-    endif()
-
-    option(WEBP_ENABLE_SIMD "" ON)
-    option(WEBP_BUILD_ANIM_UTILS "" OFF)
-    option(WEBP_BUILD_CWEBP "" OFF)
-    option(WEBP_BUILD_DWEBP "" OFF)
-    option(WEBP_BUILD_GIF2WEBP "" OFF)
-    option(WEBP_BUILD_IMG2WEBP "" OFF)
-    option(WEBP_BUILD_VWEBP "" OFF)
-    option(WEBP_BUILD_WEBPINFO "" OFF)
-    option(WEBP_BUILD_WEBPMUX "" OFF)
-    option(WEBP_BUILD_EXTRAS "" OFF)
-    option(WEBP_BUILD_WEBP_JS "" OFF)
-    option(WEBP_NEAR_LOSSLESS "" OFF)
-    option(WEBP_ENABLE_SWAP_16BIT_CSP "" OFF)
-
-    add_subdirectory(libwebp)
-
-    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/libwebp/src)
-endif()
-
 set(SHADER_SPV_HEX_FILES)
 
 realesrgan_add_shader(realesrgan_preproc.comp)
@@ -325,7 +283,7 @@ add_executable(rife-ncnn-vulkan
 
 add_dependencies(rife-ncnn-vulkan generate-spirv)
 
-set(RIFE_LINK_LIBRARIES ncnn webp ${Vulkan_LIBRARY})
+set(RIFE_LINK_LIBRARIES ncnn ${Vulkan_LIBRARY})
 
 if(USE_STATIC_MOLTENVK)
     find_library(CoreFoundation NAMES CoreFoundation)
