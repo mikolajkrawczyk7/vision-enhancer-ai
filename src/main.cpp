@@ -475,6 +475,7 @@ public:
     path_t output_dir;
     bool realesr;
     bool is_video;
+    bool is_output_video;
 };
 
 void* save(void* args)
@@ -485,6 +486,22 @@ void* save(void* args)
     const path_t output_dir = stp->output_dir;
     const bool realesr = stp->realesr;
     const bool is_video = stp->is_video;
+    const bool is_output_video = stp->is_output_video;
+
+    cv::VideoWriter writer;
+
+    if (is_output_video)
+    {
+        cv::VideoCapture cap(input_dir);
+        cv::Size frame_size(
+            static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH)),
+            static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT))
+        );
+        float fps = cap.get(cv::CAP_PROP_FPS);
+        cap.release();
+        int fourcc = cv::VideoWriter::fourcc('H', '2', '6', '4');
+        writer = cv::VideoWriter(output_dir, fourcc, fps * 2, frame_size, true);
+    }
 
     for (;;)
     {
@@ -497,7 +514,16 @@ void* save(void* args)
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        encode_image(v.outpath, v.outimage);
+        if (is_output_video)
+        {
+            cv::Mat cv_image(v.outimage.h, v.outimage.w, CV_8UC3, v.outimage.data);
+            writer.write(cv_image);
+        }
+        else
+        {
+            encode_image(v.outpath, v.outimage);
+        }
+        // encode_image(v.outpath, v.outimage);
 
         if (v.id != -1 && !realesr)
         {
@@ -505,8 +531,18 @@ void* save(void* args)
             {
                 if (is_video)
                 {
-                    encode_image(get_frame_path(output_dir, "", v.id * 2 + 1),
-                                 v.in0image);
+                    if (is_output_video)
+                    {
+                        cv::Mat cv_image(v.in0image.h, v.in0image.w, CV_8UC3, v.in0image.data);
+                        writer.write(cv_image);
+                    }
+                    else
+                    {
+                        encode_image(get_frame_path(output_dir, "", v.id * 2 + 1),
+                                     v.in0image);
+                    }
+                    // encode_image(get_frame_path(output_dir, "", v.id * 2 + 1),
+                    //              v.in0image);
                 }
                 else 
                 {
@@ -520,8 +556,18 @@ void* save(void* args)
 
             if (is_video)
             {
-                encode_image(get_frame_path(output_dir, "", v.id * 2 + 3),
-                             v.in1image);
+                if (is_output_video)
+                {
+                    cv::Mat cv_image(v.in1image.h, v.in1image.w, CV_8UC3, v.in1image.data);
+                    writer.write(cv_image);
+                }
+                else
+                {
+                    encode_image(get_frame_path(output_dir, "", v.id * 2 + 3),
+                                 v.in1image);
+                }
+                // encode_image(get_frame_path(output_dir, "", v.id * 2 + 3),
+                //              v.in1image);
             }
             else
             {
@@ -747,35 +793,35 @@ int main(int argc, char** argv)
         pattern = PATHSTR("%08d");
     }
 
-    if (!path_is_directory(outputpath))
-    {
-        // guess format from outputpath no matter what format argument specified
-        path_t ext = get_file_extension(outputpath);
+    // if (!path_is_directory(outputpath))
+    // {
+    //     // guess format from outputpath no matter what format argument specified
+    //     path_t ext = get_file_extension(outputpath);
 
-        if (ext == PATHSTR("png") || ext == PATHSTR("PNG"))
-        {
-            format = PATHSTR("png");
-        }
-        else if (ext == PATHSTR("webp") || ext == PATHSTR("WEBP"))
-        {
-            format = PATHSTR("webp");
-        }
-        else if (ext == PATHSTR("jpg") || ext == PATHSTR("JPG") || ext == PATHSTR("jpeg") || ext == PATHSTR("JPEG"))
-        {
-            format = PATHSTR("jpg");
-        }
-        else
-        {
-            fprintf(stderr, "invalid outputpath extension type\n");
-            return -1;
-        }
-    }
+    //     if (ext == PATHSTR("png") || ext == PATHSTR("PNG"))
+    //     {
+    //         format = PATHSTR("png");
+    //     }
+    //     else if (ext == PATHSTR("webp") || ext == PATHSTR("WEBP"))
+    //     {
+    //         format = PATHSTR("webp");
+    //     }
+    //     else if (ext == PATHSTR("jpg") || ext == PATHSTR("JPG") || ext == PATHSTR("jpeg") || ext == PATHSTR("JPEG"))
+    //     {
+    //         format = PATHSTR("jpg");
+    //     }
+    //     else
+    //     {
+    //         fprintf(stderr, "invalid outputpath extension type\n");
+    //         return -1;
+    //     }
+    // }
 
-    if (format != PATHSTR("png") && format != PATHSTR("webp") && format != PATHSTR("jpg"))
-    {
-        fprintf(stderr, "invalid format argument\n");
-        return -1;
-    }
+    // if (format != PATHSTR("png") && format != PATHSTR("webp") && format != PATHSTR("jpg"))
+    // {
+    //     fprintf(stderr, "invalid format argument\n");
+    //     return -1;
+    // }
 
     bool rife_v2 = false;
     bool rife_v4 = false;
@@ -817,6 +863,7 @@ int main(int argc, char** argv)
 
     int frame_count = 0;
     bool is_video = false;
+    bool is_output_video = false;
 
     // collect input and output filepath
     std::vector<path_t> input0_files;
@@ -845,6 +892,20 @@ int main(int argc, char** argv)
                 is_video = true;
             }
         }
+        else if (!path_is_directory(inputpath) && !path_is_directory(outputpath))
+        {
+            if (inputpath.find(".mp4") != std::string::npos)
+            {
+                cv::VideoCapture cap(inputpath);
+                frame_count = cap.get(cv::CAP_PROP_FRAME_COUNT);
+                cap.release();
+                is_video = true;
+            }
+            if (outputpath.find(".mp4") != std::string::npos)
+            {
+                is_output_video = true;
+            }
+        } 
         else if (!inputpath.empty() && !path_is_directory(inputpath) && !outputpath.empty() && !path_is_directory(outputpath))
         {
             input0_files.push_back(inputpath);
@@ -1054,6 +1115,7 @@ int main(int argc, char** argv)
             stp.output_dir = outputpath;
             stp.realesr = realesr;
             stp.is_video = is_video;
+            stp.is_output_video = is_output_video;
 
             std::vector<ncnn::Thread*> save_threads(jobs_save);
             for (int i=0; i<jobs_save; i++)
