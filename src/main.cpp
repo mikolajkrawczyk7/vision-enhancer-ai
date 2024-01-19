@@ -126,10 +126,12 @@ static void print_usage()
 
 static int decode_frame(cv::VideoCapture& cap, int i, ncnn::Mat& image)
 {
-    cap.set(cv::CAP_PROP_POS_FRAMES, i);
+    // cap.set(cv::CAP_PROP_POS_FRAMES, i);
 
     cv::Mat cv_image;
-    cap.read(cv_image);
+    // cap.read(cv_image);
+    
+    cap >> cv_image;
 
     int w = cv_image.cols;
     int h = cv_image.rows;
@@ -348,6 +350,7 @@ void* load(void* args)
     else
     {
         cv::VideoCapture cap;
+        ncnn::Mat temp_img;
 
         if (is_video)
         {
@@ -376,7 +379,11 @@ void* load(void* args)
             if (is_video)
             {
                 cv_lock.lock();
-                int ret0 = decode_frame(cap, i, v.in0image);
+                if (i == 0)
+                {
+                    int ret0 = decode_frame(cap, i, temp_img);
+                }
+                v.in0image = temp_img;
                 cv_lock.unlock();
             }
             else
@@ -393,7 +400,8 @@ void* load(void* args)
                 if (is_video)
                 {
                     cv_lock.lock();
-                    int ret1 = decode_frame(cap, i + 1, v.in1image);
+                    int ret1 = decode_frame(cap, i + 1, temp_img);
+                    v.in1image = temp_img;
                     cv_lock.unlock();
                 }
                 else
