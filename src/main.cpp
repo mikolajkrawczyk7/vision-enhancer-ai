@@ -379,7 +379,7 @@ void* load(void* args)
             if (is_video)
             {
                 cv_lock.lock();
-                if (i == 0)
+                if (i == 0 || realesr)
                 {
                     int ret0 = decode_frame(cap, i, temp_img);
                 }
@@ -476,6 +476,7 @@ public:
     bool realesr;
     bool is_video;
     bool is_output_video;
+    int scale;
 };
 
 void* save(void* args)
@@ -487,20 +488,39 @@ void* save(void* args)
     const bool realesr = stp->realesr;
     const bool is_video = stp->is_video;
     const bool is_output_video = stp->is_output_video;
+    const int scale = stp->scale;
 
     cv::VideoWriter writer;
 
     if (is_output_video)
     {
         cv::VideoCapture cap(input_dir);
-        cv::Size frame_size(
-            static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH)),
-            static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT))
-        );
-        float fps = cap.get(cv::CAP_PROP_FPS);
+        // fix frame size realesr
+        // cv::Size frame_size(
+        //     static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH)),
+        //     static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT))
+        // );
+        cv::Size frame_size;
+        float fps = 0.0;
+        if (realesr)
+        {
+            frame_size = cv::Size(
+                static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH)) * scale,
+                static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT)) * scale
+            );
+            fps = cap.get(cv::CAP_PROP_FPS);
+        }
+        else
+        {
+            frame_size = cv::Size(
+                static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH)),
+                static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT))
+            );
+            fps = cap.get(cv::CAP_PROP_FPS) * 2;
+        }
         cap.release();
         int fourcc = cv::VideoWriter::fourcc('H', '2', '6', '4');
-        writer = cv::VideoWriter(output_dir, fourcc, fps * 2, frame_size, true);
+        writer = cv::VideoWriter(output_dir, fourcc, fps, frame_size, true);
     }
 
     for (;;)
@@ -845,7 +865,8 @@ int main(int argc, char** argv)
     {
         // fine
     }
-    else if (model.find(PATHSTR("realesr")) != path_t::npos)
+    else if (model.find(PATHSTR("realesr")) != path_t::npos || 
+             model.find(PATHSTR("RealESR")) != path_t::npos)
     {
         realesr = true;
     }
@@ -1116,6 +1137,7 @@ int main(int argc, char** argv)
             stp.realesr = realesr;
             stp.is_video = is_video;
             stp.is_output_video = is_output_video;
+            stp.scale = scale;
 
             std::vector<ncnn::Thread*> save_threads(jobs_save);
             for (int i=0; i<jobs_save; i++)
