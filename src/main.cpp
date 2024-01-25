@@ -138,7 +138,7 @@ static int decode_frame(cv::VideoCapture& cap, int i, ncnn::Mat& image)
     int c = cv_image.channels();
 
     unsigned char* pixeldata = (unsigned char*)malloc(w * h * c);
-    std::memcpy(pixeldata, cv_image.data, w * h * c);
+    std::move(cv_image.data, cv_image.data + w * h * c, pixeldata);
 
     if (!pixeldata)
     {
@@ -170,7 +170,7 @@ static int decode_image(const path_t& imagepath, ncnn::Mat& image)
     c = cv_image.channels();
 
     pixeldata = (unsigned char*)malloc(w * h * c);
-    std::memcpy(pixeldata, cv_image.data, w * h * c);
+    std::move(cv_image.data, cv_image.data + w * h * c, pixeldata);
 
     if (!pixeldata)
     {
