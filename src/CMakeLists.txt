@@ -272,6 +272,13 @@ rife_add_shader(warp.comp)
 rife_add_shader(warp_pack4.comp)
 rife_add_shader(warp_pack8.comp)
 
+include(FetchContent)
+FetchContent_Declare(
+    argparse
+    GIT_REPOSITORY https://github.com/p-ranav/argparse.git
+)
+FetchContent_MakeAvailable(argparse)
+
 add_custom_target(generate-spirv DEPENDS ${SHADER_SPV_HEX_FILES})
 
 add_executable(rife-ncnn-vulkan
@@ -307,4 +314,4 @@ if(USE_STATIC_MOLTENVK)
     )
 endif()
 
-target_link_libraries(rife-ncnn-vulkan ${RIFE_LINK_LIBRARIES} ${OpenCV_LIBS})
+target_link_libraries(rife-ncnn-vulkan argparse ${RIFE_LINK_LIBRARIES} ${OpenCV_LIBS})
