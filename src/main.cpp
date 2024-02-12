@@ -443,7 +443,9 @@ std::vector<float> get_timesteps(int multiplier) {
 
 bool check_gpu_id(int gpu_id) {
     if (gpu_id <= -1) {
-        std::cerr << "[ERROR] GPU ID must be '-1' or greater\n";
+        std::cerr << "[ERROR] Invalid GPU ID specified: '";
+        std::cerr << gpu_id << "'. ";
+        std::cerr << "Value must be '-1' or greater.\n";
         return false;
     }
     return true;
@@ -451,7 +453,9 @@ bool check_gpu_id(int gpu_id) {
 
 bool check_num_threads(int num_threads) {
     if (num_threads <= 0) {
-        std::cerr << "[ERROR] Thread count must be positive\n";
+        std::cerr << "[ERROR] Invalid thread count specified: '";
+        std::cerr << num_threads << "'. ";
+        std::cerr << "Value must be positive.\n";
         return false;
     }
     return true;
@@ -461,11 +465,11 @@ bool check_multiplier(int multiplier, const fs::path& model_dir) {
     std::string family = model_dir.parent_path().parent_path().filename();
 
     if (family == "rife" && multiplier <= 1) {
-        std::cerr << "[ERROR] Please provide '--mul' value greater than 1\n";
+        std::cerr << "[ERROR] The RIFE model requires '--mul' value to be specified.\n";
         return false;
 
     } else if (multiplier < 0) {
-        std::cerr << "[ERROR] Target '--mul' value can't be negative\n";
+        std::cerr << "[ERROR] The '--mul' target value must be positive.\n";
         return false;
     }
 
@@ -474,22 +478,15 @@ bool check_multiplier(int multiplier, const fs::path& model_dir) {
 
 bool check_fps(float fps, fs::path src_path, fs::path dst_path) {
     if (fps == 0 && fs::is_directory(src_path) && !fs::is_directory(dst_path)) {
-        std::cerr << "[ERROR] Please provide positive '--fps' value\n";
+        std::cerr << "[ERROR] Framerate cannot be detected from the input data. ";
+        std::cerr << "Please specify '--fps' value.\n";
         return false;
 
     } else if (fps < 0) {
-        std::cerr << "[ERROR] Target '--fps' value can't be negative\n";
+        std::cerr << "[ERROR] The '--fps' target value must be positive.\n";
         return false;
     }
 
-    return true;
-}
-
-bool check_model_family(std::string model_family) {
-    if (model_family != "rife" && model_family != "realesr") {
-        std::cerr << "[ERROR] Detected model family is invalid\n";
-        return false;
-    }
     return true;
 }
 
@@ -505,12 +502,14 @@ int count_dir_files(const fs::path& path) {
 
 bool check_src_path(const fs::path& path) {
     if (!fs::exists(path)) {
-        std::cerr << "[ERROR] Source path does not exists: " << path << '\n';
+        std::cerr << "[ERROR] The specified input file or directory does not exists: '";
+        std::cerr << path << "'.\n";
         return false;
 
     } else if (fs::exists(path) && fs::is_directory(path) && 
                count_dir_files(path) == 0) {
-        std::cerr << "[ERROR] Source directory is empty: " << path << '\n';
+        std::cerr << "[ERROR] The specified input directory is empty: '";
+        std::cerr << path << "'.\n";
         return false;
     }
 
@@ -519,18 +518,24 @@ bool check_src_path(const fs::path& path) {
 
 bool check_model_dir(const fs::path& path) {
     if (!fs::exists(path)) {
-        std::cerr << "[ERROR] Specified model directory doesn't exists: " << path << '\n';
-        return false;
-    }
-
-    if (std::distance(path.begin(), path.end()) < 2) {
-        std::cerr << "[ERROR] Specified model directory is invalid: " << path << ". Valid path must contain 'model' and 'rife'/'realesr' subdirectories." << '\n';
+        std::cerr << "[ERROR] The specified model directory does not exists: ";
+        std::cerr << path << ".\n";
         return false;
     }
 
     std::string family = path.parent_path().parent_path().filename();
+
+    if (family.empty()) {
+        std::cerr << "[ERROR] The specified model directory is invalid: '";
+        std::cerr << path << "'. ";
+        std::cerr << "Ensure that your path ends with: ";
+        std::cerr << "'/<model_family>/<model_dir>/'.\n";
+        return false;
+    }
+
     if (family != "rife" && family != "realesr") {
-        std::cerr << "[ERROR] Detected model family is invalid: " << family << '\n';
+        std::cerr << "[ERROR] The detected model family is invalid: '";
+        std::cerr << family << "'.\n";
         return false;
     }
 
