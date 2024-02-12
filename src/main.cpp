@@ -100,6 +100,7 @@ struct MediaInfo {
     int width;
     int height;
     float fps;
+    int multiplier;
 };
 
 class ImageDecoder {
@@ -115,9 +116,12 @@ public:
 
     MediaInfo get_info() {
         MediaInfo info;
-        info.width = capture_.get(cv::CAP_PROP_FRAME_WIDTH); 
-        info.height = capture_.get(cv::CAP_PROP_FRAME_HEIGHT); 
-        info.fps = capture_.get(cv::CAP_PROP_FPS);
+
+        info.width      = capture_.get(cv::CAP_PROP_FRAME_WIDTH ); 
+        info.height     = capture_.get(cv::CAP_PROP_FRAME_HEIGHT); 
+        info.fps        = capture_.get(cv::CAP_PROP_FPS         );
+        info.multiplier = 1;
+
         return info;
     }
 
@@ -138,19 +142,23 @@ private:
 
 class DirImageDecoder: public ImageDecoder {
 public:
-    DirImageDecoder(const fs::path& dir_path)
-            : dir_path_(dir_path), current_(0) {}
+    DirImageDecoder(const fs::path& dir_path, int fps)
+            : dir_path_(dir_path), current_(0), fps_(fps) {}
 
     MediaInfo get_info() {
         MediaInfo info;
+
         for (const auto& entry: fs::directory_iterator(dir_path_)) {
-            std::cout << "First file: " << entry.path() << std::endl;
             cv::Mat image = cv::imread(entry.path());
-            info.width = image.cols;
-            info.height = image.rows;
-            info.fps = 0;
+
+            info.width      = image.cols;
+            info.height     = image.rows;
+            info.fps        = fps_;
+            info.multiplier = 1;
+
             break;
         }
+
         return info;
     }
 
@@ -158,7 +166,6 @@ public:
         std::ostringstream oss;
         oss << "frame_" << std::setw(8) << std::setfill('0') << current_ + 1 << ".png";
         cv::Mat cv_image = cv::imread(dir_path_ / oss.str());
-        // cv_image = cv::imread(dir_path_ / oss.str());
 
         unsigned char* raw_data = (unsigned char*)malloc(cv_image.cols * cv_image.rows * cv_image.channels());
         std::move(cv_image.data, cv_image.data + cv_image.cols * cv_image.rows * cv_image.channels(), raw_data);
@@ -170,6 +177,7 @@ public:
 private:
     fs::path dir_path_;
     int current_;
+    int fps_;
 };
 
 class ImageEncoder {
@@ -179,11 +187,7 @@ public:
 
 class VideoImageEncoder: public ImageEncoder {
 public:
-    // VideoImageEncoder(const fs::path& path, int width, int height, float fps) {
     VideoImageEncoder(const fs::path& path, MediaInfo info) {
-        // int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-        // cv::Size size = cv::Size(width, height);
-        // writer_ = cv::VideoWriter(path, fourcc, fps, size);
         int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
         cv::Size size = cv::Size(info.width, info.height);
         writer_ = cv::VideoWriter(path, fourcc, info.fps, size);
@@ -218,6 +222,7 @@ private:
 
 class Processor {
 public:
+    virtual MediaInfo get_info(MediaInfo src_info) = 0;
     virtual bool get_result(TaskQueue& load_buff, TaskQueue& save_buff) = 0;
 };
 
@@ -268,6 +273,13 @@ public:
         model_->prepadding = 10;
     }
 
+    MediaInfo get_info(MediaInfo src_info) {
+        MediaInfo dst_info = src_info;
+        dst_info.width *= scale_;
+        dst_info.height *= scale_;
+        return dst_info;
+    }
+
     bool get_result(TaskQueue& load_buff, TaskQueue& save_buff) {
         ncnn::Mat image = load_buff.front();
         if (image.empty()) {
@@ -291,10 +303,26 @@ private:
 
 class InterpolateProcessor: public Processor {
 public:
-    InterpolateProcessor(const fs::path& model_dir, int gpu_id, std::vector<float> timesteps) 
-            : timesteps_(timesteps), begin_(true), idx_(0), current_(0) {
+    InterpolateProcessor(const fs::path& model_dir, int gpu_id, int multiplier) 
+            : begin_(true), idx_(0), current_(0), multiplier_(multiplier) {
+
+        float fraction = 1.0 / multiplier;
+        float timestep = 0.0;
+
+        // std::vector<float> timesteps;
+        for (int i = 0; i < multiplier - 1; ++i) {
+            timestep += fraction;
+            timesteps_.push_back(timestep);
+        }
+
         model_ = new RIFE(gpu_id, false, false, false, 1, false, true);
         model_->load(model_dir);
+    }
+
+    MediaInfo get_info(MediaInfo src_info) {
+        MediaInfo dst_info = src_info;
+        dst_info.multiplier *= multiplier_;
+        return dst_info;
     }
 
     bool get_result(TaskQueue& load_buff, TaskQueue& save_buff) {
@@ -327,6 +355,7 @@ public:
 
 private:
     RIFE* model_;
+    int multiplier_;
     std::vector<float> timesteps_;
     bool begin_;
     int idx_;
@@ -412,19 +441,6 @@ std::vector<float> get_timesteps(int multiplier) {
     return timesteps;
 }
 
-void decoder_factory() {
-}
-
-bool check_if_exists(const std::vector<fs::path>& paths) {
-    for (int i = 0; i < paths.size(); ++i) {
-        if (!fs::exists(paths[i])) {
-            std::cerr << "[ERROR] Path does not exists: " << paths[i] << '\n';
-            return false;
-        }
-    }
-    return true;
-}
-
 bool check_gpu_id(int gpu_id) {
     if (gpu_id <= -1) {
         std::cerr << "[ERROR] GPU ID must be '-1' or greater\n";
@@ -441,22 +457,31 @@ bool check_num_threads(int num_threads) {
     return true;
 }
 
-bool check_multiplier(int multiplier) {
-    if (multiplier <= 1) {
-        std::cerr << "[ERROR] Multiplier value must be greater than '0'\n";
+bool check_multiplier(int multiplier, const fs::path& model_dir) {
+    std::string family = model_dir.parent_path().parent_path().filename();
+
+    if (family == "rife" && multiplier <= 1) {
+        std::cerr << "[ERROR] Please provide '--mul' value greater than 1\n";
+        return false;
+
+    } else if (multiplier < 0) {
+        std::cerr << "[ERROR] Target '--mul' value can't be negative\n";
         return false;
     }
+
     return true;
 }
 
 bool check_fps(float fps, fs::path src_path, fs::path dst_path) {
     if (fps == 0 && fs::is_directory(src_path) && !fs::is_directory(dst_path)) {
-        std::cerr << "[ERROR] No '--fps' argument provided\n";
+        std::cerr << "[ERROR] Please provide positive '--fps' value\n";
         return false;
+
     } else if (fps < 0) {
-        std::cerr << "[ERROR] Target FPS value can't be negative\n";
+        std::cerr << "[ERROR] Target '--fps' value can't be negative\n";
         return false;
     }
+
     return true;
 }
 
@@ -468,157 +493,124 @@ bool check_model_family(std::string model_family) {
     return true;
 }
 
-bool is_file_video(fs::path path) {
-    cv::VideoCapture capture(path);
-    if (!capture.isOpened()) {
+int count_dir_files(const fs::path& path) {
+    int count = 0;
+    for (const auto& entry : fs::directory_iterator(path)) {
+        if (fs::is_regular_file(entry)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+bool check_src_path(const fs::path& path) {
+    if (!fs::exists(path)) {
+        std::cerr << "[ERROR] Source path does not exists: " << path << '\n';
+        return false;
+
+    } else if (fs::exists(path) && fs::is_directory(path) && 
+               count_dir_files(path) == 0) {
+        std::cerr << "[ERROR] Source directory is empty: " << path << '\n';
         return false;
     }
-    capture.release();
+
     return true;
 }
 
-void parse_args(int argc, char* argv[], std::string program_name) {
-    argparse::ArgumentParser parser(program_name);
+bool check_model_dir(const fs::path& path) {
+    if (!fs::exists(path)) {
+        std::cerr << "[ERROR] Specified model directory doesn't exists: " << path << '\n';
+        return false;
+    }
 
+    if (std::distance(path.begin(), path.end()) < 2) {
+        std::cerr << "[ERROR] Specified model directory is invalid: " << path << ". Valid path must contain 'model' and 'rife'/'realesr' subdirectories." << '\n';
+        return false;
+    }
+
+    std::string family = path.parent_path().parent_path().filename();
+    if (family != "rife" && family != "realesr") {
+        std::cerr << "[ERROR] Detected model family is invalid: " << family << '\n';
+        return false;
+    }
+
+    return true;
+}
+
+void setup_parser(argparse::ArgumentParser& parser) {
     parser.add_argument("-v", "--verbose").default_value(false).implicit_value(true);
-    parser.add_argument("-i", "--input").required();
-    parser.add_argument("-o", "--output").required();
-    parser.add_argument("-m", "--model").required();
-    parser.add_argument("-t", "--threads").default_value(1).scan<'d', int>();
-    parser.add_argument("-g", "--gpu").default_value(0).scan<'d', int>();
-    parser.add_argument("--mul").default_value(1).scan<'d', int>();
-    parser.add_argument("--fps").default_value(0).scan<'d', int>();
 
+    parser.add_argument("-i", "--input"  ).required();
+    parser.add_argument("-o", "--output" ).required();
+    parser.add_argument("-m", "--model"  ).required();
+
+    parser.add_argument("-t", "--threads").default_value(1).scan<'d', int>();
+    parser.add_argument("-g", "--gpu"    ).default_value(0).scan<'d', int>();
+    parser.add_argument(      "--mul"    ).default_value(0).scan<'d', int>();
+    parser.add_argument(      "--fps"    ).default_value(0).scan<'d', int>();
+}
+
+bool parse_args(argparse::ArgumentParser& parser, int argc, char* argv[]) {
     try {
         parser.parse_args(argc, argv);
     } catch (const std::exception& err) {
         std::cerr << err.what() << '\n';
-        std::cerr << parser;
-        std::exit(1);
+        return false;
     }
+    return true;
 }
 
-int main(int argc, char* argv[]) {
-    // parse_args(argc, argv, "vision-enhancer-ai");
-
-    argparse::ArgumentParser program("vision-enhancer-ai");
-
-    program.add_argument("-v", "--verbose").default_value(false).implicit_value(true);
-    program.add_argument("-i", "--input").required();
-    program.add_argument("-o", "--output").required();
-    program.add_argument("-m", "--model").required();
-    program.add_argument("-t", "--threads").default_value(1).scan<'d', int>();
-    program.add_argument("-g", "--gpu").default_value(0).scan<'d', int>();
-    program.add_argument("--mul").default_value(1).scan<'d', int>();
-    program.add_argument("--fps").default_value(0).scan<'d', int>();
-
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::exception& err) {
-        std::cerr << err.what() << '\n';
-        std::cerr << program;
-        std::exit(1);
+bool validate_args(argparse::ArgumentParser& parser) {
+    if (!check_src_path   (parser.get     ("-i")) ||
+        !check_model_dir  (parser.get     ("-m")) ||
+        !check_gpu_id     (parser.get<int>("-g")) ||
+        !check_num_threads(parser.get<int>("-t"))
+    ) {
+        return false;
     }
 
-    fs::path src_path = program.get("-i");
-    fs::path dst_path = program.get("-o");
-    fs::path model_dir = program.get("-m");
+    if (!check_fps       (parser.get<int>("--fps"), 
+                          parser.get("-i"), parser.get("-o")) ||
 
-    int gpu_id = program.get<int>("-g");
-    int num_threads = program.get<int>("-t");
-    int multiplier = program.get<int>("--mul");
-    int fps = program.get<int>("--fps"); //float
-    bool verbose = program.get<bool>("-v");
-
-    // check model family and decide what to do
-
-    // error handling layer 1 - parameters
-    // put this in namespace (???)
-
-    // first pass
-    if (!check_if_exists({src_path, dst_path, model_dir}) ||
-        !check_gpu_id(gpu_id) ||
-        !check_num_threads(num_threads) || 
-        !check_multiplier(multiplier))
-    {
-        return -1;
+        !check_multiplier(parser.get<int>("--mul"),
+                          parser.get("-m"))
+    ) {
+        return false;
     }
 
-    std::string model_family = model_dir.parent_path().parent_path().filename();
+    return true;
+}
 
-    // second pass
-    if (!check_fps(fps, src_path, dst_path) ||
-        !check_model_family(model_family))
-    {
-        return -1;
+ImageDecoder* decoder_factory(const fs::path& path, int fps) {
+    if (fs::is_directory(path)) {
+        return new DirImageDecoder(path, fps);
     }
+    return new VideoImageDecoder(path);
+}
 
-    // check if file is image or vid
-    if (model_family == "rife" && multiplier == 1) {
-        multiplier = 2;
+ImageEncoder* encoder_factory(const fs::path& path, MediaInfo info) {
+    if (fs::is_directory(path)) {
+        return new DirImageEncoder(path);
     }
-    std::vector<float> timesteps = get_timesteps(multiplier);
+    return new VideoImageEncoder(path, info);
+}
 
-    // dst empty dir
-
-    // if (fs::is_directory(src_path)) {
-    //     
-    // }
-
-    // cv::Mat image = cv::imread("video.mp4");
-    // if (image.empty()) {
-    //     std::cout << "error\n";
-    // }
-    // if (!capture.isOpened()) {
-    //     std::cout << "error\n";
-    // }
-
-    // return 0;
-
-    // error handling layer 2 - combos
-
-    std::cout << "Source path: " << src_path << '\n';
-    std::cout << "Destination path: " << dst_path << '\n';
-    std::cout << "Model directory: " << model_dir << '\n';
-    std::cout << "GPU ID: " << gpu_id << '\n';
-    std::cout << "Processing threads: " << num_threads << '\n';
-    std::cout << "Multiplier: " << multiplier << "x\n";
-    std::cout << "Model family: " << model_family << '\n';
-
-    ImageDecoder* decoder = nullptr;
-    ImageEncoder* encoder = nullptr;
-    Processor* processor = nullptr;
-
-    if (fs::is_directory(src_path)) {
-        decoder = new DirImageDecoder(src_path);
-    } else {
-        decoder = new VideoImageDecoder(src_path);
+Processor* processor_factory(const fs::path& path, int gpu_id, int multiplier) {
+    std::string family = path.parent_path().parent_path().filename();
+    if (family == "rife") {
+        return new InterpolateProcessor(path, gpu_id, multiplier);
     }
+    return new UpscaleProcessor(path, gpu_id);
+}
 
-    if (fs::is_directory(dst_path)) {
-        encoder = new DirImageEncoder(dst_path);
-    } else {
-        MediaInfo info = decoder->get_info();
-        if (info.fps == 0) {
-            info.fps = fps;
-        } else if (model_family == "rife") {
-            info.fps *= multiplier;
-        }
-        std::cout << "Resolution: " << info.width << 'x' << info.height << '\n';
-        std::cout << "Target FPS: " << info.fps << '\n';
-        encoder = new VideoImageEncoder(dst_path, info);
-    }
+void start_job(ImageDecoder* decoder, ImageEncoder* encoder, 
+               Processor* processor, int num_threads) {
 
-    if (model_family == "rife") {
-        processor = new InterpolateProcessor(model_dir, gpu_id, timesteps);
-    } else if (model_family == "realesr") {
-        processor = new UpscaleProcessor(model_dir, gpu_id);
-    }
-
-    // main routine
+    // load
     LoadThreadParams ltp{decoder};
     ncnn::Thread load_thread(load, (void*)&ltp);
 
+    // proc
     ProcThreadParams ptp{processor};
 
     std::vector<ncnn::Thread> proc_thread;
@@ -626,18 +618,48 @@ int main(int argc, char* argv[]) {
         proc_thread.push_back(ncnn::Thread(proc, (void*)&ptp));
     }
 
+    // save
     SaveThreadParams stp{encoder};
     ncnn::Thread save_thread(save, (void*)&stp);
 
+    // load
     load_thread.join();
 
+    // proc
     load_buff.push_back(ncnn::Mat());
     for (int i = 0; i < num_threads; ++i) {
         proc_thread[i].join();
     }
 
+    // save
     save_buff.push_back(ncnn::Mat());
     save_thread.join();
+}
+
+int main(int argc, char* argv[]) {
+    argparse::ArgumentParser parser("vision-enhancer-ai");
+    setup_parser(parser);
+
+    if (!parse_args(parser, argc, argv)) {
+        return -1;
+    }
+    if (!validate_args(parser)) {
+        return -1;
+    }
+
+    ImageDecoder* decoder = decoder_factory(parser.get("-i"),
+                                            parser.get<int>("--fps"));
+
+    Processor* processor = processor_factory(parser.get("-m"), 
+                                             parser.get<int>("-g"), 
+                                             parser.get<int>("--mul"));
+
+    MediaInfo src_info = decoder->get_info();
+    MediaInfo dst_info = processor->get_info(src_info);
+
+    ImageEncoder* encoder = encoder_factory(parser.get("-o"), dst_info);
+
+    start_job(decoder, encoder, processor, parser.get<int>("-t"));
 
     return 0;
 }
