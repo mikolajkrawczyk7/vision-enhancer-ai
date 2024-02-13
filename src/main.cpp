@@ -303,7 +303,8 @@ private:
 
 class InterpolateProcessor: public Processor {
 public:
-    InterpolateProcessor(const fs::path& model_dir, int gpu_id, int multiplier) 
+    InterpolateProcessor(const fs::path& model_dir, int gpu_id, int num_threads, 
+                         int multiplier) 
             : begin_(true), idx_(0), current_(0), multiplier_(multiplier) {
 
         float fraction = 1.0 / multiplier;
@@ -315,7 +316,7 @@ public:
             timesteps_.push_back(timestep);
         }
 
-        model_ = new RIFE(gpu_id, false, false, false, 1, false, true);
+        model_ = new RIFE(gpu_id, false, false, false, num_threads, false, true);
         model_->load(model_dir);
     }
 
@@ -601,16 +602,17 @@ ImageEncoder* encoder_factory(const fs::path& path, MediaInfo info) {
     return new VideoImageEncoder(path, info);
 }
 
-Processor* processor_factory(const fs::path& path, int gpu_id, int multiplier) {
+Processor* processor_factory(const fs::path& path, int gpu_id, int num_threads, 
+                             int multiplier) {
     std::string family = path.parent_path().parent_path().filename();
     if (family == "rife") {
-        return new InterpolateProcessor(path, gpu_id, multiplier);
+        return new InterpolateProcessor(path, gpu_id, num_threads, multiplier);
     }
     return new UpscaleProcessor(path, gpu_id);
 }
 
 void start_job(ImageDecoder* decoder, ImageEncoder* encoder, 
-               Processor* processor, int num_threads) {
+               Processor* processor, int gpu_id, int num_threads) {
 
     // load
     LoadThreadParams ltp{decoder};
@@ -618,10 +620,13 @@ void start_job(ImageDecoder* decoder, ImageEncoder* encoder,
 
     // proc
     ProcThreadParams ptp{processor};
-
     std::vector<ncnn::Thread> proc_thread;
+
     for (int i = 0; i < num_threads; ++i) {
         proc_thread.push_back(ncnn::Thread(proc, (void*)&ptp));
+        if (gpu_id == -1) {
+            break;
+        }
     }
 
     // save
@@ -658,6 +663,7 @@ int main(int argc, char* argv[]) {
 
     Processor* processor = processor_factory(parser.get("-m"), 
                                              parser.get<int>("-g"), 
+                                             parser.get<int>("-t"), 
                                              parser.get<int>("--mul"));
 
     MediaInfo src_info = decoder->get_info();
@@ -665,7 +671,8 @@ int main(int argc, char* argv[]) {
 
     ImageEncoder* encoder = encoder_factory(parser.get("-o"), dst_info);
 
-    start_job(decoder, encoder, processor, parser.get<int>("-t"));
+    start_job(decoder, encoder, processor, parser.get<int>("-g"), 
+              parser.get<int>("-t"));
 
     return 0;
 }
