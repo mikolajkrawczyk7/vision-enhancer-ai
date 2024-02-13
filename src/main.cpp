@@ -321,7 +321,8 @@ public:
 
     MediaInfo get_info(MediaInfo src_info) {
         MediaInfo dst_info = src_info;
-        dst_info.multiplier *= multiplier_;
+        dst_info.multiplier = multiplier_;
+        dst_info.fps *= multiplier_;
         return dst_info;
     }
 
