@@ -389,11 +389,13 @@ void* load(void* args) {
 
 struct ProcThreadParams {
     Processor* processor;
+    bool verbose;
 };
 
 void* proc(void* args) {
     const ProcThreadParams* ptp = (const ProcThreadParams*)args;
     Processor* processor = ptp->processor;
+    bool verbose = ptp->verbose;
 
     while (true) {
         auto start = std::chrono::high_resolution_clock::now();
@@ -403,7 +405,12 @@ void* proc(void* args) {
         auto stop = std::chrono::high_resolution_clock::now();
 
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-        std::cout << "Current image: " << current + 1 << ", Duration: " << duration.count() << " ms\n";
+
+        if (verbose) {
+            std::cout << "Current image: " << current + 1 << ", ";
+            std::cout << "Duration: " << duration.count() << " ms\n";
+        }
+
         ++current;
     }
 
@@ -612,14 +619,15 @@ Processor* processor_factory(const fs::path& path, int gpu_id, int num_threads,
 }
 
 void start_job(ImageDecoder* decoder, ImageEncoder* encoder, 
-               Processor* processor, int gpu_id, int num_threads) {
+               Processor* processor, int gpu_id, int num_threads,
+               bool verbose) {
 
     // load
     LoadThreadParams ltp{decoder};
     ncnn::Thread load_thread(load, (void*)&ltp);
 
     // proc
-    ProcThreadParams ptp{processor};
+    ProcThreadParams ptp{processor, verbose};
     std::vector<ncnn::Thread> proc_thread;
 
     for (int i = 0; i < num_threads; ++i) {
@@ -672,7 +680,7 @@ int main(int argc, char* argv[]) {
     ImageEncoder* encoder = encoder_factory(parser.get("-o"), dst_info);
 
     start_job(decoder, encoder, processor, parser.get<int>("-g"), 
-              parser.get<int>("-t"));
+              parser.get<int>("-t"), parser.get<bool>("-v"));
 
     return 0;
 }
