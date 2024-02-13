@@ -443,7 +443,7 @@ std::vector<float> get_timesteps(int multiplier) {
 }
 
 bool check_gpu_id(int gpu_id) {
-    if (gpu_id <= -1) {
+    if (gpu_id < -1) {
         std::cerr << "[ERROR] Invalid GPU ID specified: '";
         std::cerr << gpu_id << "'. ";
         std::cerr << "Value must be '-1' or greater.\n";
