@@ -90,6 +90,10 @@ public:
         return v;
     }
 
+    void clear() {
+        tasks.clear();
+    }
+
 private:
     ncnn::Mutex lock;
     ncnn::ConditionVariable condition;
@@ -525,7 +529,7 @@ bool check_src_path(const fs::path& path) {
     return true;
 }
 
-bool check_model_dir(const fs::path& path) {
+bool check_model(const fs::path& path) {
     if (!fs::exists(path)) {
         std::cerr << "[ERROR] The specified model directory does not exists: ";
         std::cerr << path << ".\n";
@@ -551,12 +555,21 @@ bool check_model_dir(const fs::path& path) {
     return true;
 }
 
+bool check_model_dirs(std::vector<std::string> model_dirs) {
+    for (int i = 0; i < model_dirs.size(); ++i) {
+        if (!check_model(model_dirs[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void setup_parser(argparse::ArgumentParser& parser) {
     parser.add_argument("-v", "--verbose").default_value(false).implicit_value(true);
 
     parser.add_argument("-i", "--input"  ).required();
     parser.add_argument("-o", "--output" ).required();
-    parser.add_argument("-m", "--model"  ).required();
+    parser.add_argument("-m", "--model"  ).required().nargs(1, 2);
 
     parser.add_argument("-t", "--threads").default_value(1).scan<'d', int>();
     parser.add_argument("-g", "--gpu"    ).default_value(0).scan<'d', int>();
@@ -576,7 +589,8 @@ bool parse_args(argparse::ArgumentParser& parser, int argc, char* argv[]) {
 
 bool validate_args(argparse::ArgumentParser& parser) {
     if (!check_src_path   (parser.get     ("-i")) ||
-        !check_model_dir  (parser.get     ("-m")) ||
+        !check_model_dirs (parser.get
+                <std::vector<std::string>>("-m")) ||
         !check_gpu_id     (parser.get<int>("-g")) ||
         !check_num_threads(parser.get<int>("-t"))
     ) {
@@ -618,10 +632,15 @@ Processor* processor_factory(const fs::path& path, int gpu_id, int num_threads,
     return new UpscaleProcessor(path, gpu_id);
 }
 
+struct Job {
+    ImageDecoder* decoder;
+    ImageEncoder* encoder;
+    Processor* processor;
+};
+
 void start_job(ImageDecoder* decoder, ImageEncoder* encoder, 
                Processor* processor, int gpu_id, int num_threads,
                bool verbose) {
-
     // load
     LoadThreadParams ltp{decoder};
     ncnn::Thread load_thread(load, (void*)&ltp);
@@ -655,6 +674,39 @@ void start_job(ImageDecoder* decoder, ImageEncoder* encoder,
     save_thread.join();
 }
 
+Job setup_job(argparse::ArgumentParser& parser, const fs::path& src_path, 
+              const fs::path& dst_path, const fs::path& model_path) {
+
+    ImageDecoder* decoder = decoder_factory(src_path,
+                                            parser.get<int>("--fps"));
+
+    Processor* processor = processor_factory(model_path,
+                                             parser.get<int>("-g"), 
+                                             parser.get<int>("-t"), 
+                                             parser.get<int>("--mul"));
+
+    MediaInfo src_info = decoder->get_info();
+    MediaInfo dst_info = processor->get_info(src_info);
+
+    ImageEncoder* encoder = encoder_factory(dst_path, dst_info);
+
+    Job new_job{decoder, encoder, processor};
+    return new_job;
+}
+
+void process_job(argparse::ArgumentParser& parser, const fs::path& src_path, 
+                 const fs::path& dst_path, const fs::path& model_path) {
+
+    Job job = setup_job(parser, src_path, dst_path, model_path);
+
+    start_job(job.decoder, job.encoder, job.processor, parser.get<int>("-g"), 
+              parser.get<int>("-t"), parser.get<bool>("-v"));
+
+    current = 0;
+    load_buff.clear();
+    save_buff.clear();
+}
+
 int main(int argc, char* argv[]) {
     argparse::ArgumentParser parser("vision-enhancer-ai");
     setup_parser(parser);
@@ -666,21 +718,15 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    ImageDecoder* decoder = decoder_factory(parser.get("-i"),
-                                            parser.get<int>("--fps"));
+    auto model_paths = parser.get<std::vector<std::string>>("-m");
 
-    Processor* processor = processor_factory(parser.get("-m"), 
-                                             parser.get<int>("-g"), 
-                                             parser.get<int>("-t"), 
-                                             parser.get<int>("--mul"));
-
-    MediaInfo src_info = decoder->get_info();
-    MediaInfo dst_info = processor->get_info(src_info);
-
-    ImageEncoder* encoder = encoder_factory(parser.get("-o"), dst_info);
-
-    start_job(decoder, encoder, processor, parser.get<int>("-g"), 
-              parser.get<int>("-t"), parser.get<bool>("-v"));
+    if (model_paths.size() == 1) {
+        process_job(parser, parser.get("-i"), parser.get("-o"), 
+                    parser.get("-m"));
+    } else {
+        process_job(parser, parser.get("-i"), "temp.avi", model_paths[0]);
+        process_job(parser, "temp.avi", parser.get("-o"), model_paths[1]);
+    }
 
     return 0;
 }
