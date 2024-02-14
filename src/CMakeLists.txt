@@ -2,7 +2,7 @@ cmake_policy(SET CMP0091 NEW)
 set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(rife-ncnn-vulkan)
+project(vision-enhancer-ai)
 
 cmake_minimum_required(VERSION 3.9)
 
@@ -281,14 +281,14 @@ FetchContent_MakeAvailable(argparse)
 
 add_custom_target(generate-spirv DEPENDS ${SHADER_SPV_HEX_FILES})
 
-add_executable(rife-ncnn-vulkan
+add_executable(vision-enhancer-ai
     main.cpp
     rife.cpp
     warp.cpp
     realesrgan.cpp
 )
 
-add_dependencies(rife-ncnn-vulkan generate-spirv)
+add_dependencies(vision-enhancer-ai generate-spirv)
 
 set(RIFE_LINK_LIBRARIES ncnn ${Vulkan_LIBRARY})
 
@@ -314,4 +314,4 @@ if(USE_STATIC_MOLTENVK)
     )
 endif()
 
-target_link_libraries(rife-ncnn-vulkan argparse ${RIFE_LINK_LIBRARIES} ${OpenCV_LIBS})
+target_link_libraries(vision-enhancer-ai argparse ${RIFE_LINK_LIBRARIES} ${OpenCV_LIBS})
