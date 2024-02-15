@@ -192,9 +192,21 @@ public:
 class VideoImageEncoder: public ImageEncoder {
 public:
     VideoImageEncoder(const fs::path& path, MediaInfo info) {
-        int fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
+        std::string extension = path.filename().extension().string();
+
+        std::map<std::string, std::string> codec;
+        codec[".mkv" ] = "FFV1";
+        codec[".webm"] = "VP09";
+        codec[".avi" ] = "MJPG";
+
+        char c1 = codec[extension][0];
+        char c2 = codec[extension][1];
+        char c3 = codec[extension][2];
+        char c4 = codec[extension][3];
+
+        int fourcc = cv::VideoWriter::fourcc(c1, c2, c3, c4);
         cv::Size size = cv::Size(info.width, info.height);
-        writer_ = cv::VideoWriter(path, fourcc, info.fps, size);
+        writer_ = cv::VideoWriter(path, fourcc, info.fps, size, true);
     }
 
     void put_next(ncnn::Mat image) {
