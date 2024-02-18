@@ -25,79 +25,64 @@
 
 namespace fs = std::filesystem;
 
-class TaskQueue {
+template <typename T>
+class ThreadSafeBuffer {
 public:
-    TaskQueue() {}
+    ThreadSafeBuffer(size_t size = 8) : size_(size) {}
 
-    void push_back(ncnn::Mat v) {
-        lock.lock();
-        while (tasks.size() >= 8) {
-            condition.wait(lock);
-        }
-        tasks.push_back(v);
-        lock.unlock();
-        condition.signal();
+    void wait_custom(std::function<bool()> condition) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, condition);
+    }
+
+    void wait_full() {
+        wait_custom([this] { return data_.size() < size_; });
+    }
+
+    void wait_empty() {
+        wait_custom([this] { return !data_.empty(); });
+    }
+
+    void push_back(const T& item) {
+        wait_full();
+        data_.push_back(item);
+        condition_.notify_one();
     }
 
     void pop_front() {
-        lock.lock();
-        while (tasks.size() == 0) {
-            condition.wait(lock);
-        }
-        tasks.pop_front();
-        lock.unlock();
-        condition.signal();
+        wait_empty();
+        data_.pop_front();
+        condition_.notify_one();
     }
 
-    ncnn::Mat front() {
-        lock.lock();
-        while (tasks.size() == 0) {
-            condition.wait(lock);
-        }
-        ncnn::Mat v = tasks.front();
-        lock.unlock();
-        condition.signal();
-        return v;
+    T& front() {
+        wait_empty();
+        return data_.front();
     }
 
-    ncnn::Mat back() {
-        lock.lock();
-        while (tasks.size() == 0) {
-            condition.wait(lock);
-        }
-        ncnn::Mat v = tasks.back();
-        lock.unlock();
-        condition.signal();
-        return v;
+    T& back() {
+        wait_empty();
+        return data_.back();
     }
 
-    ncnn::Mat at(int idx) {
-        lock.lock();
-        while (tasks.size() <= idx) {
-            condition.wait(lock);
-        }
-        ncnn::Mat v = tasks.at(idx);
-        lock.unlock();
-        condition.signal();
-        return v;
+    T& at(size_t index) {
+        wait_custom([this, index](){ return data_.size() > index; });
+        return data_.at(index);
     }
 
     bool empty() {
-        bool v = true;
-        if (tasks.size() > 0) {
-            v = false;
-        }
-        return v;
+        return data_.empty();
     }
 
     void clear() {
-        tasks.clear();
+        data_.clear();
     }
 
 private:
-    ncnn::Mutex lock;
-    ncnn::ConditionVariable condition;
-    std::deque<ncnn::Mat> tasks;
+    size_t size_;
+    std::deque<T> data_;
+    std::mutex mutex_;
+    std::condition_variable condition_;
 };
 
 struct MediaInfo {
@@ -239,7 +224,7 @@ private:
 class Processor {
 public:
     virtual MediaInfo get_info(MediaInfo src_info) = 0;
-    virtual bool get_result(TaskQueue& load_buff, TaskQueue& save_buff) = 0;
+    virtual bool get_result(ThreadSafeBuffer<ncnn::Mat>& load_buff, ThreadSafeBuffer<ncnn::Mat>& save_buff) = 0;
 };
 
 class UpscaleProcessor: public Processor {
@@ -296,7 +281,7 @@ public:
         return dst_info;
     }
 
-    bool get_result(TaskQueue& load_buff, TaskQueue& save_buff) {
+    bool get_result(ThreadSafeBuffer<ncnn::Mat>& load_buff, ThreadSafeBuffer<ncnn::Mat>& save_buff) {
         ncnn::Mat image = load_buff.front();
         if (image.empty()) {
             return false;
@@ -343,7 +328,7 @@ public:
         return dst_info;
     }
 
-    bool get_result(TaskQueue& load_buff, TaskQueue& save_buff) {
+    bool get_result(ThreadSafeBuffer<ncnn::Mat>& load_buff, ThreadSafeBuffer<ncnn::Mat>& save_buff) {
         ncnn::Mat image_1 = load_buff.at(0);
         ncnn::Mat image_2 = load_buff.at(1);
         if (image_2.empty()) {
@@ -380,8 +365,8 @@ private:
     int current_;
 };
 
-TaskQueue load_buff;
-TaskQueue save_buff;
+ThreadSafeBuffer<ncnn::Mat> load_buff;
+ThreadSafeBuffer<ncnn::Mat> save_buff;
 int current = 0;
 
 struct LoadThreadParams {
