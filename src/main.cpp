@@ -4,6 +4,7 @@
 #include <functional>
 #include <algorithm>
 #include <deque>
+#include <memory>
 #include <thread>
 #include <mutex>
 #include <iomanip>
@@ -88,13 +89,13 @@ private:
 struct MediaInfo {
     int width;
     int height;
-    float fps;
+    int fps;
     int multiplier;
 };
 
 class ImageDecoder {
 public:
-    virtual ncnn::Mat get_next() = 0;
+    virtual cv::Mat   get_next() = 0;
     virtual MediaInfo get_info() = 0;
 };
 
@@ -114,20 +115,26 @@ public:
         return info;
     }
 
-    ncnn::Mat get_next() {
-        cv::Mat cv_image;
-        capture_ >> cv_image;
-
-        unsigned char* raw_data = (unsigned char*)malloc(cv_image.cols * cv_image.rows * cv_image.channels());
-        std::move(cv_image.data, cv_image.data + cv_image.cols * cv_image.rows * cv_image.channels(), raw_data);
-        ncnn::Mat ncnn_image(cv_image.cols, cv_image.rows, (void*)raw_data, (size_t)3, 3);
-
-        return ncnn_image;
+    cv::Mat get_next() {
+        cv::Mat image;
+        capture_.read(image);
+        return image;
     }
 
 private:
     cv::VideoCapture capture_;
 };
+
+std::string get_filename(const std::string& prefix, int number, 
+                         const std::string& extension) {
+    std::ostringstream oss;
+
+    oss << prefix;
+    oss << std::setw(8) << std::setfill('0') << number;
+    oss << extension;
+
+    return oss.str();
+}
 
 class DirImageDecoder: public ImageDecoder {
 public:
@@ -151,15 +158,10 @@ public:
         return info;
     }
 
-    ncnn::Mat get_next() {
-        std::ostringstream oss;
-        oss << "frame_" << std::setw(8) << std::setfill('0') << current_ + 1 << ".png";
-        cv::Mat cv_image = cv::imread(dir_path_ / oss.str());
-
-        unsigned char* raw_data = (unsigned char*)malloc(cv_image.cols * cv_image.rows * cv_image.channels());
-        std::move(cv_image.data, cv_image.data + cv_image.cols * cv_image.rows * cv_image.channels(), raw_data);
-        ncnn::Mat image(cv_image.cols, cv_image.rows, (void*)raw_data, (size_t)3, 3);
-
+    cv::Mat get_next() {
+        ++current_;
+        std::string filename = get_filename("frame_", current_, ".png");
+        cv::Mat image = cv::imread(dir_path_ / filename);
         return image;
     }
 
@@ -171,7 +173,7 @@ private:
 
 class ImageEncoder {
 public:
-    virtual void put_next(ncnn::Mat image) = 0;
+    virtual void put_next(const cv::Mat& image) = 0;
 };
 
 class VideoImageEncoder: public ImageEncoder {
@@ -194,9 +196,8 @@ public:
         writer_ = cv::VideoWriter(path, fourcc, info.fps, size, true);
     }
 
-    void put_next(ncnn::Mat image) {
-        cv::Mat cv_image(image.h, image.w, CV_8UC3, image.data);
-        writer_.write(cv_image);
+    void put_next(const cv::Mat& image) {
+        writer_.write(image);
     }
 
 private:
@@ -208,12 +209,10 @@ public:
     DirImageEncoder(const fs::path& dir_path)
             : dir_path_(dir_path), current_(0) {}
 
-    void put_next(ncnn::Mat image) {
-        cv::Mat cv_image(image.h, image.w, CV_8UC3, image.data);
-        std::ostringstream oss;
-        oss << std::setw(8) << std::setfill('0') << current_ + 1 << ".png";
-        cv::imwrite(dir_path_ / oss.str(), cv_image);
+    void put_next(const cv::Mat& image) {
         ++current_;
+        std::string filename = get_filename("", current_, ".png");
+        cv::imwrite(dir_path_ / filename, image);
     }
 
 private:
@@ -224,24 +223,31 @@ private:
 class Processor {
 public:
     virtual MediaInfo get_info(MediaInfo src_info) = 0;
-    virtual bool get_result(ThreadSafeBuffer<ncnn::Mat>& load_buff, ThreadSafeBuffer<ncnn::Mat>& save_buff) = 0;
+
+    virtual bool get_result(ThreadSafeBuffer<cv::Mat>& load_buffer,
+                            ThreadSafeBuffer<cv::Mat>& save_buffer) = 0;
 };
+
+int get_tilesize(int gpu_id) {
+    size_t heap_budget = ncnn::get_gpu_device(gpu_id)->get_heap_budget();
+
+    if (heap_budget > 1900) {
+        return 200;
+    } 
+    if (heap_budget > 550) {
+        return 100;
+    } 
+    if (heap_budget > 190) {
+        return 64;
+    }
+
+    return 32;
+}
 
 class UpscaleProcessor: public Processor {
 public:
     UpscaleProcessor(const fs::path& model_dir, int gpu_id) : current_(0) {
-        int tilesize = 0;
-        uint32_t heap_budget = ncnn::get_gpu_device(gpu_id)->get_heap_budget();
-
-        if (heap_budget > 1900) {
-            tilesize = 200;
-        } else if (heap_budget > 550) {
-            tilesize = 100;
-        } else if (heap_budget > 190) {
-            tilesize = 64;
-        } else {
-            tilesize = 32;
-        }
+        int tilesize = get_tilesize(gpu_id);
 
         path_t param_path;
         path_t model_path;
@@ -259,12 +265,12 @@ public:
 
         std::string dir_name = model_dir.parent_path().filename().string();
 
-        if (dir_name.find("x4") != std::string::npos) {
-            scale_ = 4;
+        if (dir_name.find("x2") != std::string::npos) {
+            scale_ = 2;
         } else if (dir_name.find("x3") != std::string::npos) {
             scale_ = 3;
-        } else if (dir_name.find("x2") != std::string::npos) {
-            scale_ = 2;
+        } else {
+            scale_ = 4;
         }
 
         model_ = new RealESRGAN(gpu_id, false);
@@ -274,24 +280,35 @@ public:
         model_->prepadding = 10;
     }
 
+    ~UpscaleProcessor() {
+        delete model_;
+    }
+
     MediaInfo get_info(MediaInfo src_info) {
         MediaInfo dst_info = src_info;
-        dst_info.width *= scale_;
+        dst_info.width  *= scale_;
         dst_info.height *= scale_;
         return dst_info;
     }
 
-    bool get_result(ThreadSafeBuffer<ncnn::Mat>& load_buff, ThreadSafeBuffer<ncnn::Mat>& save_buff) {
-        ncnn::Mat image = load_buff.front();
-        if (image.empty()) {
+    bool get_result(ThreadSafeBuffer<cv::Mat>& load_buffer,
+                    ThreadSafeBuffer<cv::Mat>& save_buffer) {
+        cv::Mat cv_image = load_buffer.front();
+        if (cv_image.empty()) {
             return false;
         }
-        load_buff.pop_front();
+        load_buffer.pop_front();
 
-        ncnn::Mat result(image.w * scale_, image.h * scale_, (size_t)3, 3);
-        model_->process(image, result);
+        ncnn::Mat ncnn_image(cv_image.cols, cv_image.rows, cv_image.data, 
+                             3, 3);
 
-        save_buff.push_back(result);
+        ncnn::Mat ncnn_result(ncnn_image.w * scale_, ncnn_image.h * scale_, 
+                              3, 3);
+
+        model_->process(ncnn_image, ncnn_result);
+
+        save_buffer.push_back(cv::Mat(ncnn_result.h, ncnn_result.w, CV_8UC3, 
+                                      ncnn_result.data).clone());
 
         return true;
     }
@@ -302,147 +319,11 @@ private:
     int current_;
 };
 
-class InterpolateProcessor: public Processor {
-public:
-    InterpolateProcessor(const fs::path& model_dir, int gpu_id, int num_threads, 
-                         int multiplier) 
-            : begin_(true), idx_(0), current_(0), multiplier_(multiplier) {
-
-        float fraction = 1.0 / multiplier;
-        float timestep = 0.0;
-
-        // std::vector<float> timesteps;
-        for (int i = 0; i < multiplier - 1; ++i) {
-            timestep += fraction;
-            timesteps_.push_back(timestep);
-        }
-
-        model_ = new RIFE(gpu_id, false, false, false, num_threads, false, true);
-        model_->load(model_dir);
-    }
-
-    MediaInfo get_info(MediaInfo src_info) {
-        MediaInfo dst_info = src_info;
-        dst_info.multiplier = multiplier_;
-        dst_info.fps *= multiplier_;
-        return dst_info;
-    }
-
-    bool get_result(ThreadSafeBuffer<ncnn::Mat>& load_buff, ThreadSafeBuffer<ncnn::Mat>& save_buff) {
-        ncnn::Mat image_1 = load_buff.at(0);
-        ncnn::Mat image_2 = load_buff.at(1);
-        if (image_2.empty()) {
-            return false;
-        }
-
-        ncnn::Mat result(image_1.w, image_1.h, (size_t)3, 3);
-        model_->process(image_1, image_2, timesteps_[idx_], result);
-
-        if (begin_) {
-            save_buff.push_back(image_1);
-            begin_ = !begin_;
-        }
-        save_buff.push_back(result);
-        if (idx_ == timesteps_.size() - 1) {
-            load_buff.pop_front();
-            save_buff.push_back(image_2);
-        } 
-
-        ++idx_;
-        if (idx_ == timesteps_.size()) {
-            idx_ = 0;
-        }
-
-        return true;
-    }
-
-private:
-    RIFE* model_;
-    int multiplier_;
-    std::vector<float> timesteps_;
-    bool begin_;
-    int idx_;
-    int current_;
-};
-
-ThreadSafeBuffer<ncnn::Mat> load_buff;
-ThreadSafeBuffer<ncnn::Mat> save_buff;
-int current = 0;
-
-struct LoadThreadParams {
-    ImageDecoder* decoder;
-};
-
-void* load(void* args) {
-    const LoadThreadParams* ltp = (const LoadThreadParams*)args;
-    ImageDecoder* decoder = ltp->decoder;
-
-    while (true) {
-        ncnn::Mat image = decoder->get_next();
-        if (image.empty()) {
-            break;
-        }
-        load_buff.push_back(image);
-    }
-
-    return 0;
-}
-
-struct ProcThreadParams {
-    Processor* processor;
-    bool verbose;
-};
-
-void* proc(void* args) {
-    const ProcThreadParams* ptp = (const ProcThreadParams*)args;
-    Processor* processor = ptp->processor;
-    bool verbose = ptp->verbose;
-
-    while (true) {
-        auto start = std::chrono::high_resolution_clock::now();
-        if (!processor->get_result(load_buff, save_buff)) {
-            break;
-        }
-        auto stop = std::chrono::high_resolution_clock::now();
-
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-
-        if (verbose) {
-            std::cout << "Current image: " << current + 1 << ", ";
-            std::cout << "Duration: " << duration.count() << " ms\n";
-        }
-
-        ++current;
-    }
-
-    return 0;
-}
-
-struct SaveThreadParams {
-    ImageEncoder* encoder;
-};
-
-void* save(void* args) {
-    const SaveThreadParams* stp = (const SaveThreadParams*)args;
-    ImageEncoder* encoder = stp->encoder;
-
-    while (true) {
-        ncnn::Mat image = save_buff.front();
-        if (image.empty()) {
-            break;
-        }
-        save_buff.pop_front();
-        encoder->put_next(image);
-    }
-
-    return 0;
-}
-
 std::vector<float> get_timesteps(int multiplier) {
     float fraction = 1.0 / multiplier;
     float timestep = 0.0;
-
     std::vector<float> timesteps;
+
     for (int i = 0; i < multiplier - 1; ++i) {
         timestep += fraction;
         timesteps.push_back(timestep);
@@ -451,11 +332,127 @@ std::vector<float> get_timesteps(int multiplier) {
     return timesteps;
 }
 
+class InterpolateProcessor: public Processor {
+public:
+    InterpolateProcessor(const fs::path& model_dir, int gpu_id, 
+                         int num_threads, int multiplier) 
+            : begin_(true), index_(0), current_(0), multiplier_(multiplier) {
+
+        timesteps_ = get_timesteps(multiplier);
+
+        model_ = new RIFE(gpu_id, false, false, false, num_threads, false, 
+                          true);
+        model_->load(model_dir);
+    }
+
+    ~InterpolateProcessor() {
+        delete model_;
+    }
+
+    MediaInfo get_info(MediaInfo src_info) {
+        MediaInfo dst_info = src_info;
+        dst_info.multiplier  = multiplier_;
+        dst_info.fps        *= multiplier_;
+        return dst_info;
+    }
+
+    bool get_result(ThreadSafeBuffer<cv::Mat>& load_buffer,
+                    ThreadSafeBuffer<cv::Mat>& save_buffer) {
+        if (load_buffer.at(1).empty()) {
+            return false;
+        }
+
+        std::array<cv::Mat, 2> cv_images = { load_buffer.at(0), 
+                                             load_buffer.at(1) };
+        std::array<ncnn::Mat, 2> ncnn_images;
+
+        for (int i = 0; i < 2; ++i) {
+            ncnn_images[i] = ncnn::Mat(cv_images[i].cols, cv_images[i].rows, 
+                                       cv_images[i].data, 3, 3);
+        }
+
+        ncnn::Mat ncnn_result(ncnn_images[0].w, ncnn_images[0].h, 3, 3);
+
+        model_->process(ncnn_images[0], ncnn_images[1], timesteps_[index_], 
+                        ncnn_result);
+
+        if (begin_) {
+            save_buffer.push_back(cv_images[0]);
+            begin_ = !begin_;
+        }
+
+        save_buffer.push_back(cv::Mat(ncnn_result.h, ncnn_result.w, CV_8UC3, 
+                                      ncnn_result.data).clone());
+
+        if (index_ == timesteps_.size() - 1) {
+            load_buffer.pop_front();
+            save_buffer.push_back(cv_images[1]);
+        } 
+
+        index_ = (index_ + 1) % timesteps_.size();
+
+        return true;
+    }
+
+private:
+    RIFE* model_;
+    bool begin_;
+    int current_;
+    int index_;
+    int multiplier_;
+    std::vector<float> timesteps_;
+};
+
+ThreadSafeBuffer<cv::Mat> load_buffer;
+ThreadSafeBuffer<cv::Mat> save_buffer;
+int current = 0;
+
+void load(std::shared_ptr<ImageDecoder> decoder) {
+    while (true) {
+        cv::Mat image = decoder->get_next();
+        if (image.empty()) {
+            break;
+        }
+        load_buffer.push_back(image);
+    }
+}
+
+void proc(std::shared_ptr<Processor> processor, bool verbose) {
+    while (true) {
+        auto start = std::chrono::high_resolution_clock::now();
+        if (!processor->get_result(load_buffer, save_buffer)) {
+            break;
+        }
+        auto stop = std::chrono::high_resolution_clock::now();
+
+        auto duration =
+            std::chrono::duration_cast<std::chrono::milliseconds>
+            (stop - start);
+
+        if (verbose) {
+            std::cout << "Current image: " << current + 1 << ", ";
+            std::cout << "Duration: " << duration.count() << " ms\n";
+        }
+
+        ++current;
+    }
+}
+
+void save(std::shared_ptr<ImageEncoder> encoder) {
+    while (true) {
+        cv::Mat image = save_buffer.front();
+        if (image.empty()) {
+            break;
+        }
+        save_buffer.pop_front();
+        encoder->put_next(image);
+    }
+}
+
 bool check_gpu_id(int gpu_id) {
     if (gpu_id < -1) {
-        std::cerr << "[ERROR] Invalid GPU ID specified: '";
-        std::cerr << gpu_id << "'. ";
-        std::cerr << "Value must be '-1' or greater.\n";
+        std::cerr << "[ERROR] Invalid GPU ID specified: '" << gpu_id << "'. "
+                  << "Value must be '-1' or greater.\n";
         return false;
     }
     return true;
@@ -463,9 +460,8 @@ bool check_gpu_id(int gpu_id) {
 
 bool check_num_threads(int num_threads) {
     if (num_threads <= 0) {
-        std::cerr << "[ERROR] Invalid thread count specified: '";
-        std::cerr << num_threads << "'. ";
-        std::cerr << "Value must be positive.\n";
+        std::cerr << "[ERROR] Invalid thread count specified: '"
+                  << num_threads << "'. " << "Value must be positive.\n";
         return false;
     }
     return true;
@@ -475,7 +471,8 @@ bool check_multiplier(int multiplier, const fs::path& model_dir) {
     std::string family = model_dir.parent_path().parent_path().filename();
 
     if (family == "rife" && multiplier <= 1) {
-        std::cerr << "[ERROR] The RIFE model requires '--mul' value to be specified.\n";
+        std::cerr << 
+            "[ERROR] The RIFE model requires '--mul' value to be specified.\n";
         return false;
 
     } else if (multiplier < 0) {
@@ -487,9 +484,12 @@ bool check_multiplier(int multiplier, const fs::path& model_dir) {
 }
 
 bool check_fps(float fps, fs::path src_path, fs::path dst_path) {
-    if (fps == 0 && fs::is_directory(src_path) && !fs::is_directory(dst_path)) {
-        std::cerr << "[ERROR] Framerate cannot be detected from the input data. ";
-        std::cerr << "Please specify '--fps' value.\n";
+    if (fps == 0 && fs::is_directory(src_path) && 
+        !fs::is_directory(dst_path)) {
+
+        std::cerr << "[ERROR] Framerate cannot be detected " 
+                  << "from the input data. "
+                  << "Please specify '--fps' value.\n";
         return false;
 
     } else if (fps < 0) {
@@ -502,7 +502,7 @@ bool check_fps(float fps, fs::path src_path, fs::path dst_path) {
 
 int count_dir_files(const fs::path& path) {
     int count = 0;
-    for (const auto& entry : fs::directory_iterator(path)) {
+    for (const auto& entry: fs::directory_iterator(path)) {
         if (fs::is_regular_file(entry)) {
             ++count;
         }
@@ -512,14 +512,14 @@ int count_dir_files(const fs::path& path) {
 
 bool check_src_path(const fs::path& path) {
     if (!fs::exists(path)) {
-        std::cerr << "[ERROR] The specified input file or directory does not exists: '";
-        std::cerr << path << "'.\n";
+        std::cerr << "[ERROR] The specified input file or directory " 
+                  << "does not exists: '" << path << "'.\n";
         return false;
 
     } else if (fs::exists(path) && fs::is_directory(path) && 
                count_dir_files(path) == 0) {
-        std::cerr << "[ERROR] The specified input directory is empty: '";
-        std::cerr << path << "'.\n";
+        std::cerr << "[ERROR] The specified input directory is empty: '"
+                  << path << "'.\n";
         return false;
     }
 
@@ -528,24 +528,23 @@ bool check_src_path(const fs::path& path) {
 
 bool check_model(const fs::path& path) {
     if (!fs::exists(path)) {
-        std::cerr << "[ERROR] The specified model directory does not exists: ";
-        std::cerr << path << ".\n";
+        std::cerr << "[ERROR] The specified model directory does not exists: "
+                  << path << ".\n";
         return false;
     }
 
     std::string family = path.parent_path().parent_path().filename();
 
     if (family.empty()) {
-        std::cerr << "[ERROR] The specified model directory is invalid: '";
-        std::cerr << path << "'. ";
-        std::cerr << "Ensure that your path ends with: ";
-        std::cerr << "'/<model_family>/<model_dir>/'.\n";
+        std::cerr << "[ERROR] The specified model directory is invalid: '"
+                  << path << "'. Ensure that your path ends with: "
+                  << "'/<model_family>/<model_dir>/'.\n";
         return false;
     }
 
     if (family != "rife" && family != "realesr") {
-        std::cerr << "[ERROR] The detected model family is invalid: '";
-        std::cerr << family << "'.\n";
+        std::cerr << "[ERROR] The detected model family is invalid: '"
+                  << family << "'.\n";
         return false;
     }
 
@@ -562,12 +561,12 @@ bool check_model_dirs(std::vector<std::string> model_dirs) {
 }
 
 void setup_parser(argparse::ArgumentParser& parser) {
-    parser.add_argument("-v", "--verbose").default_value(false).implicit_value(true);
+    parser.add_argument("-v", "--verbose")
+        .default_value(false).implicit_value(true);
 
     parser.add_argument("-i", "--input"  ).required();
     parser.add_argument("-o", "--output" ).required();
     parser.add_argument("-m", "--model"  ).required().nargs(1, 2);
-
     parser.add_argument("-t", "--threads").default_value(1).scan<'d', int>();
     parser.add_argument("-g", "--gpu"    ).default_value(0).scan<'d', int>();
     parser.add_argument(      "--mul"    ).default_value(0).scan<'d', int>();
@@ -585,11 +584,10 @@ bool parse_args(argparse::ArgumentParser& parser, int argc, char* argv[]) {
 }
 
 bool validate_args(argparse::ArgumentParser& parser) {
-    if (!check_src_path   (parser.get     ("-i")) ||
-        !check_model_dirs (parser.get
-                <std::vector<std::string>>("-m")) ||
-        !check_gpu_id     (parser.get<int>("-g")) ||
-        !check_num_threads(parser.get<int>("-t"))
+    if (!check_src_path   (parser.get                          ("-i")) ||
+        !check_model_dirs (parser.get<std::vector<std::string>>("-m")) ||
+        !check_gpu_id     (parser.get<int>                     ("-g")) ||
+        !check_num_threads(parser.get<int>                     ("-t"))
     ) {
         return false;
     }
@@ -606,102 +604,93 @@ bool validate_args(argparse::ArgumentParser& parser) {
     return true;
 }
 
-ImageDecoder* decoder_factory(const fs::path& path, int fps) {
+std::shared_ptr<ImageDecoder> decoder_factory(const fs::path& path, int fps) {
     if (fs::is_directory(path)) {
-        return new DirImageDecoder(path, fps);
+        return std::make_shared<DirImageDecoder>(path, fps);
     }
-    return new VideoImageDecoder(path);
+    return std::make_shared<VideoImageDecoder>(path);
 }
 
-ImageEncoder* encoder_factory(const fs::path& path, MediaInfo info) {
+std::shared_ptr<ImageEncoder> encoder_factory(const fs::path& path,
+                                              MediaInfo info) {
     if (fs::is_directory(path)) {
-        return new DirImageEncoder(path);
+        return std::make_shared<DirImageEncoder>(path);
     }
-    return new VideoImageEncoder(path, info);
+    return std::make_shared<VideoImageEncoder>(path, info);
 }
 
-Processor* processor_factory(const fs::path& path, int gpu_id, int num_threads, 
-                             int multiplier) {
+std::shared_ptr<Processor> processor_factory(const fs::path& path, int gpu_id,
+                                             int num_threads, int multiplier) {
     std::string family = path.parent_path().parent_path().filename();
     if (family == "rife") {
-        return new InterpolateProcessor(path, gpu_id, num_threads, multiplier);
+        return std::make_shared<InterpolateProcessor>(path, gpu_id, 
+                                                      num_threads, multiplier);
     }
-    return new UpscaleProcessor(path, gpu_id);
+    return std::make_shared<UpscaleProcessor>(path, gpu_id);
 }
 
 struct Job {
-    ImageDecoder* decoder;
-    ImageEncoder* encoder;
-    Processor* processor;
+    std::shared_ptr<ImageDecoder> decoder;
+    std::shared_ptr<ImageEncoder> encoder;
+    std::shared_ptr<Processor> processor;
 };
 
-void start_job(ImageDecoder* decoder, ImageEncoder* encoder, 
-               Processor* processor, int gpu_id, int num_threads,
-               bool verbose) {
+void start_job(Job job, int gpu_id, int num_threads, bool verbose) {
     // load
-    LoadThreadParams ltp{decoder};
-    ncnn::Thread load_thread(load, (void*)&ltp);
+    std::thread load_thread(load, job.decoder);
 
     // proc
-    ProcThreadParams ptp{processor, verbose};
-    std::vector<ncnn::Thread> proc_thread;
-
+    std::vector<std::thread> proc_thread;
     for (int i = 0; i < num_threads; ++i) {
-        proc_thread.push_back(ncnn::Thread(proc, (void*)&ptp));
+        proc_thread.push_back(std::thread(proc, job.processor, verbose));
         if (gpu_id == -1) {
             break;
         }
     }
 
     // save
-    SaveThreadParams stp{encoder};
-    ncnn::Thread save_thread(save, (void*)&stp);
+    std::thread save_thread(save, job.encoder);
 
     // load
     load_thread.join();
 
     // proc
-    load_buff.push_back(ncnn::Mat());
+    load_buffer.push_back(cv::Mat());
     for (int i = 0; i < num_threads; ++i) {
         proc_thread[i].join();
     }
 
     // save
-    save_buff.push_back(ncnn::Mat());
+    save_buffer.push_back(cv::Mat());
     save_thread.join();
 }
 
 Job setup_job(argparse::ArgumentParser& parser, const fs::path& src_path, 
               const fs::path& dst_path, const fs::path& model_path) {
+    auto decoder = decoder_factory(src_path, parser.get<int>("--fps"));
 
-    ImageDecoder* decoder = decoder_factory(src_path,
-                                            parser.get<int>("--fps"));
-
-    Processor* processor = processor_factory(model_path,
-                                             parser.get<int>("-g"), 
-                                             parser.get<int>("-t"), 
-                                             parser.get<int>("--mul"));
+    auto processor = 
+        processor_factory(model_path, parser.get<int>("-g"),
+                          parser.get<int>("-t"), parser.get<int>("--mul"));
 
     MediaInfo src_info = decoder->get_info();
     MediaInfo dst_info = processor->get_info(src_info);
 
-    ImageEncoder* encoder = encoder_factory(dst_path, dst_info);
+    auto encoder = encoder_factory(dst_path, dst_info);
 
-    Job new_job{decoder, encoder, processor};
-    return new_job;
+    return Job{decoder, encoder, processor};
 }
 
 void process_job(argparse::ArgumentParser& parser, const fs::path& src_path, 
                  const fs::path& dst_path, const fs::path& model_path) {
-
     Job job = setup_job(parser, src_path, dst_path, model_path);
 
-    start_job(job.decoder, job.encoder, job.processor, parser.get<int>("-g"), 
-              parser.get<int>("-t"), parser.get<bool>("-v"));
+    start_job(job, parser.get<int>("-g"), parser.get<int>("-t"),
+              parser.get<bool>("-v"));
 
     current = 0;
-    load_buff.clear();
-    save_buff.clear();
+    load_buffer.clear();
+    save_buffer.clear();
 }
 
 int main(int argc, char* argv[]) {
@@ -718,7 +707,7 @@ int main(int argc, char* argv[]) {
     auto model_paths = parser.get<std::vector<std::string>>("-m");
 
     if (model_paths.size() == 1) {
-        process_job(parser, parser.get("-i"), parser.get("-o"), 
+        process_job(parser, parser.get("-i"), parser.get("-o"),
                     parser.get("-m"));
     } else {
         process_job(parser, parser.get("-i"), "temp.avi", model_paths[0]);
