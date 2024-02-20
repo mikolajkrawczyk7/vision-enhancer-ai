@@ -185,6 +185,7 @@ public:
         codec[".mkv" ] = "FFV1";
         codec[".webm"] = "VP09";
         codec[".avi" ] = "MJPG";
+        codec[".mp4" ] = "H264";
 
         char c1 = codec[extension][0];
         char c2 = codec[extension][1];
@@ -611,18 +612,24 @@ std::shared_ptr<ImageDecoder> decoder_factory(const fs::path& path, int fps) {
     return std::make_shared<VideoImageDecoder>(path);
 }
 
-bool is_video_path(const fs::path& path) {
+bool check_extension(const std::vector<std::string> extensions, 
+                     const fs::path& path) {
     std::string extension = path.filename().extension().string();
-    std::vector<std::string> video_extensions = {".mkv", ".webm", ".avi"};
+    auto iter = std::find(extensions.begin(), extensions.end(), extension);
 
-    auto iter = std::find(video_extensions.begin(), video_extensions.end(),
-                          extension);
-
-    if (iter == video_extensions.end()) {
+    if (iter == extensions.end()) {
         return false;
     }
 
     return true;
+}
+
+bool is_video_path(const fs::path& path) {
+    return check_extension({".mkv", ".webm", ".avi", ".mp4"}, path);
+}
+
+bool is_image_path(const fs::path& path) {
+    return check_extension({".png", ".jpg", ".webp"}, path);
 }
 
 std::shared_ptr<ImageEncoder> encoder_factory(const fs::path& path,
@@ -711,10 +718,12 @@ int main(int argc, char* argv[]) {
     argparse::ArgumentParser parser("vision-enhancer-ai");
     setup_parser(parser);
 
+    // add options for example to list models
     if (!parse_args(parser, argc, argv) || !validate_args(parser)) {
         return -1;
     }
 
+    // implement single image procesing
     fs::path dst_path = parser.get("-o");
 
     if (!is_video_path(dst_path) && !fs::exists(dst_path)) {
@@ -723,6 +732,7 @@ int main(int argc, char* argv[]) {
 
     auto model_paths = parser.get<std::vector<std::string>>("-m");
 
+    // refactor job related things
     if (model_paths.size() == 1) {
         process_job(parser, parser.get("-i"), parser.get("-o"),
                     parser.get("-m"));
