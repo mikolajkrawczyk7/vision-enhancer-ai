@@ -611,12 +611,26 @@ std::shared_ptr<ImageDecoder> decoder_factory(const fs::path& path, int fps) {
     return std::make_shared<VideoImageDecoder>(path);
 }
 
+bool is_video_path(const fs::path& path) {
+    std::string extension = path.filename().extension().string();
+    std::vector<std::string> video_extensions = {".mkv", ".webm", ".avi"};
+
+    auto iter = std::find(video_extensions.begin(), video_extensions.end(),
+                          extension);
+
+    if (iter == video_extensions.end()) {
+        return false;
+    }
+
+    return true;
+}
+
 std::shared_ptr<ImageEncoder> encoder_factory(const fs::path& path,
                                               MediaInfo info) {
-    if (fs::is_directory(path)) {
-        return std::make_shared<DirImageEncoder>(path);
+    if (is_video_path(path)) {
+        return std::make_shared<VideoImageEncoder>(path, info);
     }
-    return std::make_shared<VideoImageEncoder>(path, info);
+    return std::make_shared<DirImageEncoder>(path);
 }
 
 std::shared_ptr<Processor> processor_factory(const fs::path& path, int gpu_id,
@@ -697,11 +711,14 @@ int main(int argc, char* argv[]) {
     argparse::ArgumentParser parser("vision-enhancer-ai");
     setup_parser(parser);
 
-    if (!parse_args(parser, argc, argv)) {
+    if (!parse_args(parser, argc, argv) || !validate_args(parser)) {
         return -1;
     }
-    if (!validate_args(parser)) {
-        return -1;
+
+    fs::path dst_path = parser.get("-o");
+
+    if (!is_video_path(dst_path) && !fs::exists(dst_path)) {
+        fs::create_directories(dst_path);
     }
 
     auto model_paths = parser.get<std::vector<std::string>>("-m");
