@@ -171,6 +171,15 @@ private:
     int fps_;
 };
 
+cv::Mat get_target_image(const cv::Mat& image, MediaInfo info) {
+    cv::Mat target_image = image;
+    if (image.cols != info.width || image.rows != info.height) {
+        cv::Size new_size(info.width, info.height);
+        cv::resize(image, target_image, new_size);
+    }
+    return target_image;
+}
+
 class ImageEncoder {
 public:
     virtual void put_next(const cv::Mat& image) = 0;
@@ -178,7 +187,8 @@ public:
 
 class VideoImageEncoder: public ImageEncoder {
 public:
-    VideoImageEncoder(const fs::path& path, MediaInfo info) {
+    VideoImageEncoder(const fs::path& path, MediaInfo info)
+            : info_(info) {
         std::string extension = path.filename().extension().string();
 
         std::map<std::string, std::string> codec;
@@ -198,26 +208,28 @@ public:
     }
 
     void put_next(const cv::Mat& image) {
-        writer_.write(image);
+        writer_.write(get_target_image(image, info_));
     }
 
 private:
     cv::VideoWriter writer_;
+    MediaInfo info_;
 };
 
 class DirImageEncoder: public ImageEncoder {
 public:
-    DirImageEncoder(const fs::path& dir_path)
-            : dir_path_(dir_path), current_(0) {}
+    DirImageEncoder(const fs::path& dir_path, MediaInfo info)
+            : dir_path_(dir_path), info_(info), current_(0) {}
 
     void put_next(const cv::Mat& image) {
         ++current_;
         std::string filename = get_filename("", current_, ".png");
-        cv::imwrite(dir_path_ / filename, image);
+        cv::imwrite(dir_path_ / filename, get_target_image(image, info_));
     }
 
 private:
     fs::path dir_path_;
+    MediaInfo info_;
     int current_;
 };
 
@@ -552,6 +564,15 @@ bool check_model(const fs::path& path) {
     return true;
 }
 
+bool check_scale(int scale) {
+    if (scale <= 0) {
+        std::cerr << "[ERROR] Invalid scale parameter specified: '"
+                  << scale << "'. Value must be positive.\n";
+        return false;
+    }
+    return true;
+}
+
 bool check_model_dirs(std::vector<std::string> model_dirs) {
     for (int i = 0; i < model_dirs.size(); ++i) {
         if (!check_model(model_dirs[i])) {
@@ -572,6 +593,7 @@ void setup_parser(argparse::ArgumentParser& parser) {
     parser.add_argument("-g", "--gpu"    ).default_value(0).scan<'d', int>();
     parser.add_argument(      "--mul"    ).default_value(0).scan<'d', int>();
     parser.add_argument(      "--fps"    ).default_value(0).scan<'d', int>();
+    parser.add_argument("-s", "--scale"  ).default_value(1).scan<'d', int>();
 }
 
 bool parse_args(argparse::ArgumentParser& parser, int argc, char* argv[]) {
@@ -588,7 +610,8 @@ bool validate_args(argparse::ArgumentParser& parser) {
     if (!check_src_path   (parser.get                          ("-i")) ||
         !check_model_dirs (parser.get<std::vector<std::string>>("-m")) ||
         !check_gpu_id     (parser.get<int>                     ("-g")) ||
-        !check_num_threads(parser.get<int>                     ("-t"))
+        !check_num_threads(parser.get<int>                     ("-t")) ||
+        !check_scale      (parser.get<int>                     ("-s"))
     ) {
         return false;
     }
@@ -637,7 +660,7 @@ std::shared_ptr<ImageEncoder> encoder_factory(const fs::path& path,
     if (is_video_path(path)) {
         return std::make_shared<VideoImageEncoder>(path, info);
     }
-    return std::make_shared<DirImageEncoder>(path);
+    return std::make_shared<DirImageEncoder>(path, info);
 }
 
 std::shared_ptr<Processor> processor_factory(const fs::path& path, int gpu_id,
@@ -695,7 +718,15 @@ Job setup_job(argparse::ArgumentParser& parser, const fs::path& src_path,
                           parser.get<int>("-t"), parser.get<int>("--mul"));
 
     MediaInfo src_info = decoder->get_info();
-    MediaInfo dst_info = processor->get_info(src_info);
+    MediaInfo dst_info = src_info;
+    
+    int scale = parser.get<int>("-s");
+    if (scale == 1) {
+        dst_info = processor->get_info(src_info);
+    } else if (scale > 1) {
+        dst_info.width *= scale;
+        dst_info.height *= scale;
+    }
 
     auto encoder = encoder_factory(dst_path, dst_info);
 
