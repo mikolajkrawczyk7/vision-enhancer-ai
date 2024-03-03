@@ -16,3 +16,25 @@ command: ./vision-enhancer-ai -i <input_path> -o <output_path> -m <model_path> <
 --fps <target_fps>         - Target framerate, must be specified when input path is pointing to directory.
 --scale/-s <output_scale>  - Target scale, this can be used to resize output video.
 ```
+
+# Building from source
+## Installing dependencies (Debian/Ubuntu and derivatives)
+```
+sudo apt install libvulkan-dev libopencv-dev
+```
+## Cloning repository
+```
+git clone https://github.com/mikolajkrawczyk7/vision-enhancer-ai.git
+cd vision-enhancer-ai
+git submodule update --init --recursive
+```
+## Compiling
+```
+mkdir build
+cd build
+cmake ../src
+make -j16
+```
+
+# Adding models
+Models can be downloaded from: https://github.com/mikolajkrawczyk7/vision-enhancer-ai-models. You can put them anywhere but specific model must be placed in 'realesr' or 'rife' subdirectory.
